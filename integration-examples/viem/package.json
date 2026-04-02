@@ -1,0 +1,16 @@
+{
+  "name": "forgepool-viem-example",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "example": "npx tsx src/index.ts"
+  },
+  "dependencies": {
+    "viem": "^2"
+  },
+  "devDependencies": {
+    "tsx": "^4",
+    "typescript": "^5"
+  }
+}

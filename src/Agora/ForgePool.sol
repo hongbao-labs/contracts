@@ -171,6 +171,10 @@ contract ForgePool is ForgePoolAccess {
         return info.expire - block.timestamp;
     }
 
+    function getFeeRange() external view returns (uint256, uint256) {
+        return (minFeeBps, maxFeeBps);
+    }
+
     /// @notice 计算签名 digest（设备端签名用，两种提取路径共用）
     function getWithdrawDigest(address unlockAddress, address to, uint256 feeBps) external view returns (bytes32) {
         return _getDigest(unlockAddress, to, feeBps);
