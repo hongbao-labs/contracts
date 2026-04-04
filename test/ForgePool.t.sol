@@ -21,12 +21,13 @@ contract ForgePoolTest is Test {
     uint256 constant FEE_BPS = 200; // 2% — 用户签名时承诺的手续费
 
     function setUp() public {
-        pool = new ForgePool(feeReceiver);
         token = new MockERC20("TestToken", "TT", 18);
+        pool = new ForgePool(address(token), feeReceiver);
         cardAddr = vm.addr(cardPk);
 
-        // 授权 relayer
+        // 授权 relayer + minter
         pool.addRelayer(relayer);
+        pool.addMinter(initiator);
 
         // 给 initiator 铸币并 approve
         token.mint(initiator, 10000 ether);
@@ -38,7 +39,7 @@ contract ForgePoolTest is Test {
 
     function _deposit(uint256 amount, uint256 lockTime) internal {
         vm.prank(initiator);
-        pool.deposit(cardAddr, address(token), amount, lockTime);
+        pool.deposit(cardAddr, amount, lockTime);
     }
 
     function _deposit100() internal {
@@ -73,26 +74,96 @@ contract ForgePoolTest is Test {
     function test_deposit_revert_zero_amount() public {
         vm.prank(initiator);
         vm.expectRevert(ForgePoolErrors.ZeroAmount.selector);
-        pool.deposit(cardAddr, address(token), 0, 180 days);
+        pool.deposit(cardAddr, 0, 180 days);
     }
 
     function test_deposit_revert_already_locked() public {
         _deposit100();
         vm.prank(initiator);
         vm.expectRevert(abi.encodeWithSelector(ForgePoolErrors.AlreadyLocked.selector, cardAddr));
-        pool.deposit(cardAddr, address(token), 50 ether, 180 days);
+        pool.deposit(cardAddr, 50 ether, 180 days);
     }
 
     function test_deposit_revert_lock_time_too_short() public {
         vm.prank(initiator);
         vm.expectRevert(abi.encodeWithSelector(ForgePoolErrors.LockTimeTooShort.selector, 1 days, 180 days));
-        pool.deposit(cardAddr, address(token), 100 ether, 1 days);
+        pool.deposit(cardAddr, 100 ether, 1 days);
     }
 
     function test_deposit_revert_zero_address() public {
         vm.prank(initiator);
         vm.expectRevert(ForgePoolErrors.ZeroAddress.selector);
-        pool.deposit(address(0), address(token), 100 ether, 180 days);
+        pool.deposit(address(0), 100 ether, 180 days);
+    }
+
+    function test_deposit_revert_not_minter() public {
+        address stranger = address(0xBAD);
+        token.mint(stranger, 100 ether);
+        vm.prank(stranger);
+        token.approve(address(pool), type(uint256).max);
+
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(ForgePoolErrors.NotMinter.selector, stranger));
+        pool.deposit(cardAddr, 100 ether, 180 days);
+    }
+
+    // ================================================================
+    //                        BATCH DEPOSIT
+    // ================================================================
+
+    function test_batchDeposit() public {
+        address[] memory addrs = new address[](3);
+        addrs[0] = vm.addr(0xBEEF);
+        addrs[1] = vm.addr(0xCAFE);
+        addrs[2] = vm.addr(0xFACE);
+
+        vm.prank(initiator);
+        pool.batchDeposit(addrs, 50 ether, 180 days);
+
+        assertEq(token.balanceOf(address(pool)), 150 ether);
+        for (uint256 i = 0; i < 3; i++) {
+            DepositInfo memory info = pool.getDepositInfo(addrs[i]);
+            assertEq(info.initiator, initiator);
+            assertEq(info.amount, 50 ether);
+            assertEq(info.token, address(token));
+            assertTrue(pool.isLocked(addrs[i]));
+        }
+    }
+
+    function test_batchDeposit_revert_empty_array() public {
+        address[] memory addrs = new address[](0);
+        vm.prank(initiator);
+        vm.expectRevert(ForgePoolErrors.EmptyArray.selector);
+        pool.batchDeposit(addrs, 50 ether, 180 days);
+    }
+
+    function test_batchDeposit_revert_zero_amount() public {
+        address[] memory addrs = new address[](1);
+        addrs[0] = vm.addr(0xBEEF);
+        vm.prank(initiator);
+        vm.expectRevert(ForgePoolErrors.ZeroAmount.selector);
+        pool.batchDeposit(addrs, 0, 180 days);
+    }
+
+    function test_batchDeposit_revert_duplicate_address() public {
+        address addr = vm.addr(0xBEEF);
+        address[] memory addrs = new address[](2);
+        addrs[0] = addr;
+        addrs[1] = addr;
+
+        vm.prank(initiator);
+        vm.expectRevert(abi.encodeWithSelector(ForgePoolErrors.AlreadyLocked.selector, addr));
+        pool.batchDeposit(addrs, 50 ether, 180 days);
+    }
+
+    function test_batchDeposit_revert_not_minter() public {
+        address stranger = address(0xBAD);
+        address[] memory addrs = new address[](1);
+        addrs[0] = vm.addr(0xBEEF);
+
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(ForgePoolErrors.NotMinter.selector, stranger));
+        pool.batchDeposit(addrs, 50 ether, 180 days);
     }
 
     // ================================================================
@@ -241,7 +312,7 @@ contract ForgePoolTest is Test {
             vm.prank(initiator);
             token.approve(address(pool), type(uint256).max);
             vm.prank(initiator);
-            pool.deposit(addrs[i], address(token), 100 ether, 180 days);
+            pool.deposit(addrs[i], 100 ether, 180 days);
         }
 
         RelayerWithdrawParams[] memory params = new RelayerWithdrawParams[](3);
@@ -309,7 +380,7 @@ contract ForgePoolTest is Test {
             vm.prank(initiator);
             token.approve(address(pool), type(uint256).max);
             vm.prank(initiator);
-            pool.deposit(addrs[i], address(token), 100 ether, 180 days);
+            pool.deposit(addrs[i], 100 ether, 180 days);
         }
 
         vm.warp(block.timestamp + 180 days + 1);
@@ -357,6 +428,10 @@ contract ForgePoolTest is Test {
         assertTrue(d1 != d3);
     }
 
+    function test_lockedToken() public view {
+        assertEq(pool.lockedToken(), address(token));
+    }
+
     // ================================================================
     //                       ACCESS CONTROL
     // ================================================================
@@ -370,6 +445,17 @@ contract ForgePoolTest is Test {
 
         pool.removeRelayer(newRelayer);
         assertFalse(pool.isRelayer(newRelayer));
+    }
+
+    function test_addMinter_removeMinter() public {
+        address newMinter = address(0xDDD);
+        assertFalse(pool.isMinter(newMinter));
+
+        pool.addMinter(newMinter);
+        assertTrue(pool.isMinter(newMinter));
+
+        pool.removeMinter(newMinter);
+        assertFalse(pool.isMinter(newMinter));
     }
 
     function test_transferOwnership() public {
@@ -424,7 +510,7 @@ contract ForgePoolTest is Test {
 
         vm.prank(initiator);
         vm.expectRevert(ForgePoolErrors.ContractPaused.selector);
-        pool.deposit(cardAddr, address(token), 100 ether, 180 days);
+        pool.deposit(cardAddr, 100 ether, 180 days);
 
         pool.unpause();
         assertFalse(pool.paused());

@@ -26,6 +26,9 @@ contract ForgePool is ForgePoolAccess {
     uint256 public maxFeeBps; // 默认 1000 = 10%
     address public feeRecipient;
 
+    // ---- Token ----
+    address public immutable lockedToken;
+
     // ---- EIP-712 ----
     bytes32 public immutable DOMAIN_SEPARATOR;
 
@@ -36,8 +39,10 @@ contract ForgePool is ForgePoolAccess {
     //                         CONSTRUCTOR
     // ================================================================
 
-    constructor(address _feeRecipient) {
+    constructor(address _token, address _feeRecipient) {
+        if (_token == address(0)) revert ForgePoolErrors.ZeroAddress();
         owner = msg.sender;
+        lockedToken = _token;
         feeRecipient = _feeRecipient == address(0) ? msg.sender : _feeRecipient;
         minLockTime = 180 days;
         minFeeBps = 50; // 0.5%
@@ -58,20 +63,18 @@ contract ForgePool is ForgePoolAccess {
     //                           DEPOSIT
     // ================================================================
 
-    /// @notice 存入 ERC20，锁定到卡片公钥地址
-    function deposit(address unlockAddress, address token, uint256 amount, uint256 lockTime) external whenNotPaused {
+    /// @notice 存入 ERC20，锁定到卡片公钥地址（仅白名单 minter 可调用）
+    function deposit(address unlockAddress, uint256 amount, uint256 lockTime) external onlyMinter whenNotPaused {
         if (amount == 0) revert ForgePoolErrors.ZeroAmount();
         if (unlockAddress == address(0)) revert ForgePoolErrors.ZeroAddress();
-        if (token == address(0)) revert ForgePoolErrors.ZeroAddress();
         if (depositRecord[unlockAddress].amount != 0) revert ForgePoolErrors.AlreadyLocked(unlockAddress);
         if (lockTime < minLockTime) revert ForgePoolErrors.LockTimeTooShort(lockTime, minLockTime);
 
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
-
+        IERC20(lockedToken).safeTransferFrom(msg.sender, address(this), amount);
         depositRecord[unlockAddress] = DepositInfo({
             initiator: msg.sender,
             unlockAddress: unlockAddress,
-            token: token,
+            token: lockedToken,
             amount: amount,
             lockTime: lockTime,
             mintTimeStamp: block.timestamp,
@@ -79,7 +82,45 @@ contract ForgePool is ForgePoolAccess {
             unlockedAt: 0
         });
 
-        emit ForgePoolEvents.Deposited(msg.sender, unlockAddress, token, amount, block.timestamp + lockTime);
+        emit ForgePoolEvents.Deposited(msg.sender, unlockAddress, lockedToken, amount, block.timestamp + lockTime);
+    }
+
+    /// @notice 批量存入 ERC20，锁定到多个卡片公钥地址（仅白名单 minter 可调用）
+    /// @param unlockAddresses 卡片公钥地址列表
+    /// @param amount 每张卡片锁定数量
+    /// @param lockTime 锁定时长
+    function batchDeposit(address[] calldata unlockAddresses, uint256 amount, uint256 lockTime)
+        external
+        onlyMinter
+        whenNotPaused
+    {
+        uint256 len = unlockAddresses.length;
+        if (len == 0) revert ForgePoolErrors.EmptyArray();
+        if (amount == 0) revert ForgePoolErrors.ZeroAmount();
+        if (lockTime < minLockTime) revert ForgePoolErrors.LockTimeTooShort(lockTime, minLockTime);
+
+        uint256 totalAmount = amount * len;
+        IERC20(lockedToken).safeTransferFrom(msg.sender, address(this), totalAmount);
+
+        uint256 expire = block.timestamp + lockTime;
+        for (uint256 i = 0; i < len; i++) {
+            address addr = unlockAddresses[i];
+            if (addr == address(0)) revert ForgePoolErrors.ZeroAddress();
+            if (depositRecord[addr].amount != 0) revert ForgePoolErrors.AlreadyLocked(addr);
+
+            depositRecord[addr] = DepositInfo({
+                initiator: msg.sender,
+                unlockAddress: addr,
+                token: lockedToken,
+                amount: amount,
+                lockTime: lockTime,
+                mintTimeStamp: block.timestamp,
+                expire: expire,
+                unlockedAt: 0
+            });
+
+            emit ForgePoolEvents.Deposited(msg.sender, addr, lockedToken, amount, expire);
+        }
     }
 
     // ================================================================

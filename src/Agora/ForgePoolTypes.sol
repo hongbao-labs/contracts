@@ -64,6 +64,12 @@ library ForgePoolErrors {
     error NotRelayer(address caller);
     error FeeTooHigh(uint256 provided, uint256 maximum);
 
+    // ---- Minter ----
+    error NotMinter(address caller);
+
+    // ---- Batch ----
+    error EmptyArray();
+
     // ---- Access ----
     error NotOwner(address caller);
     error NotPendingOwner(address caller);

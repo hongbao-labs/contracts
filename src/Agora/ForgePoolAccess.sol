@@ -10,12 +10,15 @@ abstract contract ForgePoolAccess {
     bool public paused;
 
     mapping(address => bool) public isRelayer;
+    mapping(address => bool) public isMinter;
 
     // ---- Events ----
     event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event RelayerAdded(address indexed relayer);
     event RelayerRemoved(address indexed relayer);
+    event MinterAdded(address indexed minter);
+    event MinterRemoved(address indexed minter);
     event Paused(address indexed account);
     event Unpaused(address indexed account);
 
@@ -27,6 +30,11 @@ abstract contract ForgePoolAccess {
 
     modifier onlyRelayer() {
         if (!isRelayer[msg.sender]) revert ForgePoolErrors.NotRelayer(msg.sender);
+        _;
+    }
+
+    modifier onlyMinter() {
+        if (!isMinter[msg.sender]) revert ForgePoolErrors.NotMinter(msg.sender);
         _;
     }
 
@@ -61,6 +69,19 @@ abstract contract ForgePoolAccess {
     function removeRelayer(address relayer) external onlyOwner {
         isRelayer[relayer] = false;
         emit RelayerRemoved(relayer);
+    }
+
+    // ---- Minter Management ----
+
+    function addMinter(address minter) external onlyOwner {
+        if (minter == address(0)) revert ForgePoolErrors.ZeroAddress();
+        isMinter[minter] = true;
+        emit MinterAdded(minter);
+    }
+
+    function removeMinter(address minter) external onlyOwner {
+        isMinter[minter] = false;
+        emit MinterRemoved(minter);
     }
 
     // ---- Pause ----
