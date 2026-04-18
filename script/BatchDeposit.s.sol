@@ -2,32 +2,32 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Script.sol";
-import "../src/Agora/ForgePool.sol";
-import {IERC20} from "../src/Agora/IERC20.sol";
+import {HongBaoPool} from "../src/HongBao/HongBaoPool.sol";
+import {IERC20} from "../src/HongBao/interfaces/IERC20.sol";
 
-/// @title BatchDeposit — 项目方批量 mint 脚本
-/// @notice 从 JSON 文件读取设备公钥地址列表，批量调用 ForgePool.batchDeposit
+/// @title BatchDeposit — project-side script to mint a batch of locked cards
 ///
-/// 环境变量:
-///   FORGEPOOL       — ForgePool 合约地址
-///   AMOUNT_ETHER    — 每张卡片锁定数量（整数，单位 ether，如 100）
-///   LOCK_DAYS       — 锁定天数（如 180）
-///   ADDRESSES_JSON  — 地址列表 JSON 文件路径（相对于 contract/ 目录）
+/// @notice Reads a JSON list of card addresses and calls
+///         `HongBaoPool.batchDeposit`.
 ///
-/// JSON 文件格式:
-///   { "addresses": ["0xAbc...", "0xDef...", ...] }
+/// @notice Environment variables:
+///           POOL            — HongBaoPool address
+///           AMOUNT_ETHER    — per-card amount in whole tokens (e.g. "100")
+///           LOCK_DAYS       — lock duration in days (must be >= 30)
+///           ADDRESSES_JSON  — path to JSON file of card addresses
 ///
-/// 用法:
-///   cd contract
+/// @notice JSON format:
+///           { "addresses": ["0xAbc...", "0xDef...", ...] }
 ///
-///   FORGEPOOL=0x... AMOUNT_ETHER=100 LOCK_DAYS=180 ADDRESSES_JSON=./addresses.json \
+/// @notice Usage:
+///   POOL=0x... AMOUNT_ETHER=100 LOCK_DAYS=30 ADDRESSES_JSON=./addresses.json \
 ///   forge script script/BatchDeposit.s.sol \
 ///     --rpc-url $RPC_URL \
 ///     --private-key $PRIVATE_KEY \
 ///     --broadcast
 contract BatchDeposit is Script {
     function run() external {
-        ForgePool pool = ForgePool(vm.envAddress("FORGEPOOL"));
+        HongBaoPool pool = HongBaoPool(vm.envAddress("POOL"));
         uint256 amount = vm.envUint("AMOUNT_ETHER") * 1 ether;
         uint256 lockTime = vm.envUint("LOCK_DAYS") * 1 days;
 
@@ -36,17 +36,23 @@ contract BatchDeposit is Script {
         require(addresses.length > 0, "addresses array is empty");
 
         address token = pool.lockedToken();
+        address poolInitiator = pool.initiator();
         uint256 totalAmount = amount * addresses.length;
 
         console.log("=========================================");
-        console.log("  ForgePool BatchDeposit");
+        console.log("  HongBaoPool.batchDeposit");
         console.log("=========================================");
-        console.log("ForgePool:", address(pool));
-        console.log("Token:    ", token);
-        console.log("Count:    ", addresses.length);
-        console.log("Total:    ", totalAmount / 1 ether, "ether");
+        console.log("Pool:      ", address(pool));
+        console.log("Token:     ", token);
+        console.log("Initiator: ", poolInitiator);
+        console.log("Count:     ", addresses.length);
+        console.log("Per card:  ", amount / 1 ether, "(tokens)");
+        console.log("Total:     ", totalAmount / 1 ether, "(tokens)");
 
-        require(pool.isMinter(msg.sender), "sender is not in minter whitelist");
+        require(
+            poolInitiator == address(0) || poolInitiator == msg.sender,
+            "sender does not match pool initiator"
+        );
         require(IERC20(token).balanceOf(msg.sender) >= totalAmount, "insufficient token balance");
 
         vm.startBroadcast();
@@ -58,5 +64,7 @@ contract BatchDeposit is Script {
 
         pool.batchDeposit(addresses, amount, lockTime);
         vm.stopBroadcast();
+
+        console.log(">>> Done.");
     }
 }

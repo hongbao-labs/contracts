@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ForgePool 端到端集成测试
+HongBao 端到端集成测试
 
 完整流程：
   1. 启动 anvil 本地链
-  2. 部署 MockERC20 + ForgePool
+  2. 部署 MockERC20 + HongBaoPool（直接部署 + 通过 HongBaoFactory）
   3. 连接 STM32 设备，获取卡片以太坊地址
   4. Initiator 存入代币，锁定到卡片地址
   5. 从合约获取 withdraw digest
   6. 设备签名 digest
-  7. 测试 withdrawFromCard（全额，无手续费）
-  8. 测试 withdrawFromCardByRelayer（扣手续费）
-  9. 测试 withdrawExpired（过期取回）
- 10. 测试 batchWithdrawFromCardByRelayer
- 11. 测试签名不匹配 revert
+  7. 测试 withdraw（全额，任何人可提交）
+  8. 测试 withdrawExpired（过期取回）
+  9. 测试 batchDeposit
+ 10. 测试签名不匹配 revert
+ 11. 测试 HongBaoFactory.createPool + computePoolAddress
 
 依赖: forge, cast, anvil (foundry), stm32_crypto_wrapper
 """
@@ -22,6 +22,7 @@ ForgePool 端到端集成测试
 import os
 import sys
 import time
+import secrets
 import subprocess
 import atexit
 
@@ -37,13 +38,16 @@ DEPLOYER_PK = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff8
 DEPLOYER_ADDR = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 INITIATOR_PK = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
 INITIATOR_ADDR = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
-RELAYER_PK = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
-RELAYER_ADDR = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
-FEE_RECIPIENT = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
+SUBMITTER_PK = "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
+SUBMITTER_ADDR = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
 RECIPIENT_ADDR = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
 
 ANVIL_PORT = "18545"
 RPC = f"http://127.0.0.1:{ANVIL_PORT}"
+
+# Must be >= MIN_LOCK_TIME (30 days) in HongBaoPool.
+LOCK_SECONDS = 30 * 24 * 60 * 60
+WARP_SECONDS = LOCK_SECONDS + 1
 
 anvil_proc = None
 
@@ -87,15 +91,22 @@ def cast_send(contract, sig, *args, pk=DEPLOYER_PK):
     )
 
 
+def _parse_uint(raw: str) -> int:
+    raw = raw.strip()
+    # cast 可能返回 "100000000000000000000 [1e20]" 格式，只取首段
+    num = raw.split()[0] if raw.split() else raw
+    return int(num, 16) if num.startswith("0x") else int(num)
+
+
 def get_balance(token_addr, who) -> int:
-    raw = cast_call(token_addr, "balanceOf(address)(uint256)", who).strip()
-    # cast 可能返回 "100000000000000000000 [1e20]" 格式，只取数字部分
-    num_part = raw.split()[0] if raw.split() else raw
-    return int(num_part, 16) if num_part.startswith("0x") else int(num_part)
+    return _parse_uint(cast_call(token_addr, "balanceOf(address)(uint256)", who))
+
+
+def card_total(pool, card_addr) -> int:
+    return _parse_uint(cast_call(pool, "cardTotal(address)(uint256)", card_addr))
 
 
 def _free_port(port: str):
-    """若端口被占用则终止占用进程（便于上次未退出的 anvil 释放端口）。"""
     r = subprocess.run(
         ["lsof", "-ti", f":{port}"],
         capture_output=True,
@@ -140,8 +151,6 @@ def start_anvil():
             msg += f" stderr: {err.strip()[:500]}"
         if out and out.strip():
             msg += f" stdout: {out.strip()[:500]}"
-        if not (err and err.strip()) and not (out and out.strip()):
-            msg += f" 可能原因: 端口 {ANVIL_PORT} 已被占用，或 anvil 未正确安装。"
         raise RuntimeError(msg)
     print(f"  anvil pid={anvil_proc.pid}")
 
@@ -166,40 +175,60 @@ def deploy(contract_path, *constructor_args) -> str:
     raise RuntimeError(f"部署失败:\n{output}")
 
 
-def fresh_pool_and_token():
-    """Deploy fresh MockERC20 + ForgePool, configure for testing."""
+def fresh_pool_and_token(initiator=INITIATOR_ADDR):
+    """Deploy fresh MockERC20 + HongBaoPool, fund initiator."""
     token = deploy("test/mocks/MockERC20.sol:MockERC20", "TestToken", "TT", "18")
-    pool = deploy("src/Agora/ForgePool.sol:ForgePool", FEE_RECIPIENT)
+    pool = deploy(
+        "src/HongBao/HongBaoPool.sol:HongBaoPool",
+        token,
+        initiator,
+    )
 
-    # Mint, approve, add relayer, set minLockTime=10s
     cast_send(token, "mint(address,uint256)", INITIATOR_ADDR, str(10000 * 10**18))
-    cast_send(token, "approve(address,uint256)", pool, str(2**256 - 1), pk=INITIATOR_PK)
-    cast_send(pool, "addRelayer(address)", RELAYER_ADDR)
-    cast_send(pool, "setMinLockTime(uint256)", "10")
-
+    cast_send(
+        token,
+        "approve(address,uint256)",
+        pool,
+        str(2**256 - 1),
+        pk=INITIATOR_PK,
+    )
     return pool, token
 
 
-def deposit(pool, token, card_addr, amount_tt, lock_seconds=60):
+def deposit(pool, card_addr, amount_tt, lock_seconds=LOCK_SECONDS):
     cast_send(
         pool,
-        "deposit(address,address,uint256,uint256)",
+        "deposit(address,uint256,uint256)",
         card_addr,
-        token,
         str(int(amount_tt * 10**18)),
         str(lock_seconds),
         pk=INITIATOR_PK,
     )
 
 
-def get_digest(pool, card_addr, to, fee_bps):
+def batch_deposit(pool, addrs, amount_tt, lock_seconds=LOCK_SECONDS):
+    addrs_arg = "[" + ",".join(addrs) + "]"
+    cast_send(
+        pool,
+        "batchDeposit(address[],uint256,uint256)",
+        addrs_arg,
+        str(int(amount_tt * 10**18)),
+        str(lock_seconds),
+        pk=INITIATOR_PK,
+    )
+
+
+def get_digest(pool, card_addr, to):
     return cast_call(
         pool,
-        "getWithdrawDigest(address,address,uint256)(bytes32)",
+        "getWithdrawDigest(address,address)(bytes32)",
         card_addr,
         to,
-        str(fee_bps),
     )
+
+
+def random_address() -> str:
+    return to_checksum_address("0x" + secrets.token_hex(20))
 
 
 def print_header(n, title):
@@ -210,12 +239,11 @@ def print_header(n, title):
 
 def main():
     print("=" * 60)
-    print("  ForgePool E2E Test — STM32 Device + On-chain Contract")
+    print("  HongBao E2E Test — STM32 Device + On-chain Contract")
     print("=" * 60)
 
     start_anvil()
 
-    # Connect device
     print("\n[Device] 连接 STM32...")
     crypto = STM32CryptoWrapper()
     crypto.connect()
@@ -223,156 +251,125 @@ def main():
     print(f"  卡片地址: {card_addr}")
 
     results = []
-    FEE_BPS = 200  # 2%
 
     # ================================================================
-    # Test 1: withdrawFromCard — 全额，无手续费
+    # Test 1: withdraw — 全额，任何人可提交
     # ================================================================
-    print_header(1, "withdrawFromCard — 全额无手续费")
+    print_header(1, "withdraw — 全额，由 submitter（非 initiator）提交")
 
     pool, token = fresh_pool_and_token()
-    deposit(pool, token, card_addr, 100)
+    deposit(pool, card_addr, 100)
     print("  存入 100 TT")
 
-    digest = get_digest(pool, card_addr, RECIPIENT_ADDR, FEE_BPS)
+    digest = get_digest(pool, card_addr, RECIPIENT_ADDR)
     sig = crypto.sign_digest_ethereum(digest)
     print(f"  签名: v={sig['v']}")
 
     bal_before = get_balance(token, RECIPIENT_ADDR)
     cast_send(
         pool,
-        "withdrawFromCard(address,address,uint256,uint8,bytes32,bytes32)",
+        "withdraw(address,address,uint8,bytes32,bytes32)",
         card_addr,
         RECIPIENT_ADDR,
-        str(FEE_BPS),
         str(sig["v"]),
         sig["r"],
         sig["s"],
-        pk=INITIATOR_PK,
+        pk=SUBMITTER_PK,  # 注意：非 initiator，也非 "relayer"，就是任意第三方
     )
     payout = get_balance(token, RECIPIENT_ADDR) - bal_before
-    fee = get_balance(token, FEE_RECIPIENT)
 
-    ok = payout == 100 * 10**18 and fee == 0
-    print(
-        f"  到账: {payout / 10**18} TT, fee: {fee / 10**18} TT → {'PASS' if ok else 'FAIL'}"
-    )
-    results.append(("withdrawFromCard (full amount, no fee)", ok))
+    ok = payout == 100 * 10**18
+    print(f"  到账: {payout / 10**18} TT → {'PASS' if ok else 'FAIL'}")
+    results.append(("withdraw (full amount, submitted by anyone)", ok))
 
     # ================================================================
-    # Test 2: withdrawFromCardByRelayer — 扣手续费
+    # Test 2: withdrawExpired — 过期取回
     # ================================================================
-    print_header(2, "withdrawFromCardByRelayer — 扣 2% 手续费")
-
-    pool, token = fresh_pool_and_token()
-    deposit(pool, token, card_addr, 100)
-
-    digest = get_digest(pool, card_addr, RECIPIENT_ADDR, FEE_BPS)
-    sig = crypto.sign_digest_ethereum(digest)
-
-    bal_r_before = get_balance(token, RECIPIENT_ADDR)
-    bal_f_before = get_balance(token, FEE_RECIPIENT)
-
-    cast_send(
-        pool,
-        "withdrawFromCardByRelayer(address,address,uint256,uint8,bytes32,bytes32)",
-        card_addr,
-        RECIPIENT_ADDR,
-        str(FEE_BPS),
-        str(sig["v"]),
-        sig["r"],
-        sig["s"],
-        pk=RELAYER_PK,
-    )
-
-    payout = get_balance(token, RECIPIENT_ADDR) - bal_r_before
-    fee = get_balance(token, FEE_RECIPIENT) - bal_f_before
-
-    ok = payout == 98 * 10**18 and fee == 2 * 10**18
-    print(
-        f"  到账: {payout / 10**18} TT, fee: {fee / 10**18} TT → {'PASS' if ok else 'FAIL'}"
-    )
-    results.append(("withdrawFromCardByRelayer (2% fee)", ok))
-
-    # ================================================================
-    # Test 3: withdrawExpired — 过期取回
-    # ================================================================
-    print_header(3, "withdrawExpired — 过期后 Initiator 取回")
+    print_header(2, "withdrawExpired — 过期后 Initiator 取回")
 
     pool, token = fresh_pool_and_token()
     bal_init_before = get_balance(token, INITIATOR_ADDR)
-    deposit(pool, token, card_addr, 100, lock_seconds=10)
-    print("  存入 100 TT, lockTime=10s")
+    deposit(pool, card_addr, 100, lock_seconds=LOCK_SECONDS)
+    print(f"  存入 100 TT, lockTime={LOCK_SECONDS}s")
 
-    # 快进
-    run(["cast", "rpc", "evm_increaseTime", "15", "--rpc-url", RPC])
+    run(["cast", "rpc", "evm_increaseTime", str(WARP_SECONDS), "--rpc-url", RPC])
     run(["cast", "rpc", "evm_mine", "--rpc-url", RPC])
-    print("  快进 15 秒")
+    print(f"  快进 {WARP_SECONDS} 秒")
 
     cast_send(pool, "withdrawExpired(address)", card_addr, pk=INITIATOR_PK)
-    bal_init_after = get_balance(token, INITIATOR_ADDR)
-    net = bal_init_after - bal_init_before  # deposit -100, withdraw +100 = 0
+    net = get_balance(token, INITIATOR_ADDR) - bal_init_before  # -100 + 100 = 0
 
     ok = net == 0
-    print(f"  token 净变化: {net / 10**18} TT → {'PASS' if ok else 'FAIL'}")
+    print(f"  initiator 净变化: {net / 10**18} TT → {'PASS' if ok else 'FAIL'}")
     results.append(("withdrawExpired (full return)", ok))
 
     # ================================================================
-    # Test 4: batchWithdrawFromCardByRelayer
+    # Test 3: batchDeposit — 批量存款，随后用签名提取其中一张
     # ================================================================
-    print_header(4, "batchWithdrawFromCardByRelayer — 批量 Relayer")
+    print_header(3, "batchDeposit — 3 张卡，随后 withdraw 其中 1 张")
 
     pool, token = fresh_pool_and_token()
-    deposit(pool, token, card_addr, 500)
+    extra1 = random_address()
+    extra2 = random_address()
+    cards = [card_addr, extra1, extra2]
+    batch_deposit(pool, cards, 100)
+    print(f"  批量存入 3 张卡，每张 100 TT")
 
-    digest = get_digest(pool, card_addr, RECIPIENT_ADDR, FEE_BPS)
+    for c in cards:
+        total = card_total(pool, c)
+        assert total == 100 * 10**18, f"card {c} total mismatch: {total}"
+
+    # 只能对有私钥的 card_addr 执行 withdraw。
+    digest = get_digest(pool, card_addr, RECIPIENT_ADDR)
     sig = crypto.sign_digest_ethereum(digest)
 
-    bal_r_before = get_balance(token, RECIPIENT_ADDR)
-    bal_f_before = get_balance(token, FEE_RECIPIENT)
-
-    param = (
-        f"[({card_addr},{RECIPIENT_ADDR},{FEE_BPS},{sig['v']},{sig['r']},{sig['s']})]"
-    )
+    bal_before = get_balance(token, RECIPIENT_ADDR)
     cast_send(
         pool,
-        "batchWithdrawFromCardByRelayer((address,address,uint256,uint8,bytes32,bytes32)[])",
-        param,
-        pk=RELAYER_PK,
+        "withdraw(address,address,uint8,bytes32,bytes32)",
+        card_addr,
+        RECIPIENT_ADDR,
+        str(sig["v"]),
+        sig["r"],
+        sig["s"],
+        pk=SUBMITTER_PK,
+    )
+    payout = get_balance(token, RECIPIENT_ADDR) - bal_before
+
+    # 其它两张卡应原封不动。
+    other_totals_ok = (
+        card_total(pool, extra1) == 100 * 10**18
+        and card_total(pool, extra2) == 100 * 10**18
     )
 
-    payout = get_balance(token, RECIPIENT_ADDR) - bal_r_before
-    fee = get_balance(token, FEE_RECIPIENT) - bal_f_before
-
-    ok = payout == 490 * 10**18 and fee == 10 * 10**18
+    ok = payout == 100 * 10**18 and other_totals_ok
     print(
-        f"  到账: {payout / 10**18} TT, fee: {fee / 10**18} TT → {'PASS' if ok else 'FAIL'}"
+        f"  到账: {payout / 10**18} TT, 其它两张卡未受影响: {other_totals_ok} → {'PASS' if ok else 'FAIL'}"
     )
-    results.append(("batchWithdrawFromCardByRelayer (500 TT, 2% fee)", ok))
+    results.append(("batchDeposit + single withdraw", ok))
 
     # ================================================================
-    # Test 5: 错误签名 revert
+    # Test 4: Invalid signature — 应 revert
     # ================================================================
-    print_header(5, "Invalid signature — 应 revert")
+    print_header(4, "Invalid signature — 应 revert")
 
     pool, token = fresh_pool_and_token()
-    deposit(pool, token, card_addr, 100)
+    deposit(pool, card_addr, 100)
 
-    # 签给 DEPLOYER_ADDR 但提交时传 RECIPIENT_ADDR
-    wrong_digest = get_digest(pool, card_addr, DEPLOYER_ADDR, FEE_BPS)
+    # 签给 DEPLOYER_ADDR 但提交时传 RECIPIENT_ADDR → digest 对不上
+    wrong_digest = get_digest(pool, card_addr, DEPLOYER_ADDR)
     sig = crypto.sign_digest_ethereum(wrong_digest)
 
     try:
         cast_send(
             pool,
-            "withdrawFromCard(address,address,uint256,uint8,bytes32,bytes32)",
+            "withdraw(address,address,uint8,bytes32,bytes32)",
             card_addr,
             RECIPIENT_ADDR,
-            str(FEE_BPS),
             str(sig["v"]),
             sig["r"],
             sig["s"],
-            pk=INITIATOR_PK,
+            pk=SUBMITTER_PK,
         )
         ok = False
         print("  结果: FAIL (应 revert 但成功了)")
@@ -382,34 +379,41 @@ def main():
     results.append(("invalid signature revert", ok))
 
     # ================================================================
-    # Test 6: 非 Relayer 调用 revert
+    # Test 5: HongBaoFactory — 部署、预测地址、实际部署一致
     # ================================================================
-    print_header(6, "Non-relayer 调用 withdrawFromCardByRelayer — 应 revert")
+    print_header(5, "HongBaoFactory.createPool + computePoolAddress")
 
-    pool, token = fresh_pool_and_token()
-    deposit(pool, token, card_addr, 100)
+    token = deploy("test/mocks/MockERC20.sol:MockERC20", "FactoryToken", "FT", "18")
+    factory = deploy("src/HongBao/HongBaoFactory.sol:HongBaoFactory")
 
-    digest = get_digest(pool, card_addr, RECIPIENT_ADDR, FEE_BPS)
-    sig = crypto.sign_digest_ethereum(digest)
+    predicted_raw = cast_call(
+        factory,
+        "computePoolAddress(address,address)(address)",
+        token,
+        INITIATOR_ADDR,
+    )
+    predicted = predicted_raw.strip()
 
-    try:
-        cast_send(
-            pool,
-            "withdrawFromCardByRelayer(address,address,uint256,uint8,bytes32,bytes32)",
-            card_addr,
-            RECIPIENT_ADDR,
-            str(FEE_BPS),
-            str(sig["v"]),
-            sig["r"],
-            sig["s"],
-            pk=INITIATOR_PK,
-        )  # initiator 不是 relayer
-        ok = False
-        print("  结果: FAIL (应 revert)")
-    except RuntimeError:
-        ok = True
-        print("  结果: PASS (正确 revert: NotRelayer)")
-    results.append(("non-relayer revert", ok))
+    cast_send(
+        factory,
+        "createPool(address,address)",
+        token,
+        INITIATOR_ADDR,
+    )
+
+    registered_raw = cast_call(
+        factory,
+        "pools(address,address)(address)",
+        token,
+        INITIATOR_ADDR,
+    )
+    registered = registered_raw.strip()
+
+    ok = predicted.lower() == registered.lower() and int(registered, 16) != 0
+    print(f"  Predicted: {predicted}")
+    print(f"  Deployed:  {registered}")
+    print(f"  结果: {'PASS' if ok else 'FAIL'}")
+    results.append(("factory computePoolAddress == createPool", ok))
 
     # ================================================================
     # Summary

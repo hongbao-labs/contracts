@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {IERC20} from "./IERC20.sol";
+import {IERC20} from "../interfaces/IERC20.sol";
 
+/// @title SafeERC20
+/// @notice Minimal safe-transfer helpers that tolerate non-standard ERC20
+///         implementations which return no data on success.
 library SafeERC20 {
     error SafeTransferFailed();
     error SafeTransferFromFailed();

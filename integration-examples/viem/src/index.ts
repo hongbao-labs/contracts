@@ -9,16 +9,22 @@ import {
 } from 'viem';
 import { mainnet } from 'viem/chains';
 
-const ForgePoolABI = parseAbi([
-  'function getDepositInfo(address unlockAddress) view returns ((address initiator, address unlockAddress, address token, uint256 amount, uint256 lockTime, uint256 mintTimeStamp, uint256 expire, uint256 unlockedAt))',
-  'function getWithdrawDigest(address unlockAddress, address to, uint256 feeBps) view returns (bytes32)',
-  'function getFeeRange() view returns (uint256 minFeeBps, uint256 maxFeeBps)',
-  'function withdrawFromCard(address unlockAddress, address to, uint256 feeBps, uint8 v, bytes32 r, bytes32 s)',
+const HongBaoPoolABI = parseAbi([
+  'function lockedToken() view returns (address)',
+  'function initiator() view returns (address)',
+  'function cardTotal(address unlockAddress) view returns (uint256)',
+  'function cardExpire(address unlockAddress) view returns (uint256)',
+  'function cardUnlockedAt(address unlockAddress) view returns (uint256)',
+  'function isLocked(address unlockAddress) view returns (bool)',
+  'function isExpired(address unlockAddress) view returns (bool)',
+  'function remainingLockTime(address unlockAddress) view returns (uint256)',
+  'function getWithdrawDigest(address unlockAddress, address to) view returns (bytes32)',
+  'function withdraw(address unlockAddress, address to, uint8 v, bytes32 r, bytes32 s)',
 ]);
 
 // ============ Config ============
 
-const FORGEPOOL_ADDRESS = process.env.FORGEPOOL_ADDRESS as Address;
+const POOL_ADDRESS = process.env.POOL_ADDRESS as Address;
 const RPC_URL = process.env.RPC_URL;
 
 // ============ Client ============
@@ -31,26 +37,29 @@ const publicClient = createPublicClient({
 // ============ Read: hongbao status ============
 
 export async function getHongbaoStatus(unlockAddress: Address) {
-  const info = await publicClient.readContract({
-    address: FORGEPOOL_ADDRESS,
-    abi: ForgePoolABI,
-    functionName: 'getDepositInfo',
-    args: [unlockAddress],
+  const [total, expire, unlockedAt, token] = await publicClient.multicall({
+    contracts: [
+      { address: POOL_ADDRESS, abi: HongBaoPoolABI, functionName: 'cardTotal', args: [unlockAddress] },
+      { address: POOL_ADDRESS, abi: HongBaoPoolABI, functionName: 'cardExpire', args: [unlockAddress] },
+      { address: POOL_ADDRESS, abi: HongBaoPoolABI, functionName: 'cardUnlockedAt', args: [unlockAddress] },
+      { address: POOL_ADDRESS, abi: HongBaoPoolABI, functionName: 'lockedToken' },
+    ],
+    allowFailure: false,
   });
 
-  const isLocked = info.amount > 0n && info.unlockedAt === 0n;
+  const isLocked = total > 0n && unlockedAt === 0n;
 
   if (!isLocked) {
-    return { info, isLocked: false, isExpired: false } as const;
+    return { total, expire, unlockedAt, token, isLocked: false, isExpired: false } as const;
   }
 
   const now = BigInt(Math.floor(Date.now() / 1000));
-  const isExpired = now >= info.expire;
+  const isExpired = now >= expire;
 
   const [symbolResult, decimalsResult] = await publicClient.multicall({
     contracts: [
-      { address: info.token, abi: erc20Abi, functionName: 'symbol' },
-      { address: info.token, abi: erc20Abi, functionName: 'decimals' },
+      { address: token, abi: erc20Abi, functionName: 'symbol' },
+      { address: token, abi: erc20Abi, functionName: 'decimals' },
     ],
   });
 
@@ -58,57 +67,71 @@ export async function getHongbaoStatus(unlockAddress: Address) {
   const decimals = decimalsResult.result!;
 
   return {
-    info,
+    total,
+    expire,
+    unlockedAt,
+    token,
     isLocked: true,
     isExpired,
     tokenSymbol: symbol,
     tokenDecimals: decimals,
-    displayAmount: formatUnits(info.amount, decimals),
+    displayAmount: formatUnits(total, decimals),
   };
 }
 
 // ============ Read: withdraw digest ============
 
-export async function getWithdrawDigest(
-  unlockAddress: Address,
-  to: Address,
-  feeBps: bigint,
-) {
+export async function getWithdrawDigest(unlockAddress: Address, to: Address) {
   return publicClient.readContract({
-    address: FORGEPOOL_ADDRESS,
-    abi: ForgePoolABI,
+    address: POOL_ADDRESS,
+    abi: HongBaoPoolABI,
     functionName: 'getWithdrawDigest',
-    args: [unlockAddress, to, feeBps],
+    args: [unlockAddress, to],
   });
 }
 
-// ============ Read: fee range ============
+// ============ Write: submit withdraw ============
+//
+// `withdraw` 无调用者限制，任何 EOA 都能提交。以下展示两种常见路径。
 
-export async function getFeeRange() {
-  const [minFeeBps, maxFeeBps] = await publicClient.readContract({
-    address: FORGEPOOL_ADDRESS,
-    abi: ForgePoolABI,
-    functionName: 'getFeeRange',
-  });
-  return { minFeeBps, maxFeeBps };
-}
+/**
+ * Path A — 用 App 侧钱包直接上链。
+ * 使用处需传入一个 viem walletClient。
+ */
+// export async function submitWithdrawOnchain(
+//   walletClient: WalletClient,
+//   unlockAddress: Address,
+//   to: Address,
+//   v: number,
+//   r: Hex,
+//   s: Hex,
+// ): Promise<Hex> {
+//   return walletClient.writeContract({
+//     address: POOL_ADDRESS,
+//     abi: HongBaoPoolABI,
+//     functionName: 'withdraw',
+//     args: [unlockAddress, to, v, r, s],
+//   });
+// }
 
-// ============ Write: submit to relayer ============
+/**
+ * Path B — 交给 App 后端的代付服务。
+ * 合约层面不区分，这一层纯业务。
+ */
+const SPONSOR_API = process.env.SPONSOR_API;
 
-const RELAYER_API = process.env.RELAYER_API!;
-
-export async function submitWithdrawal(
+export async function submitWithdrawSponsored(
   unlockAddress: Address,
   to: Address,
-  feeBps: number,
   v: number,
   r: Hex,
   s: Hex,
 ) {
-  const res = await fetch(`${RELAYER_API}/api/withdrawal`, {
+  if (!SPONSOR_API) throw new Error('SPONSOR_API not configured');
+  const res = await fetch(`${SPONSOR_API}/api/withdrawal`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ unlockAddress, to, feeBps, v, r, s }),
+    body: JSON.stringify({ unlockAddress, to, v, r, s }),
   });
   if (!res.ok) {
     const err = await res.json();
@@ -117,22 +140,17 @@ export async function submitWithdrawal(
   return res.json();
 }
 
-export async function getWithdrawalStatus(unlockAddress: Address) {
-  const res = await fetch(`${RELAYER_API}/api/withdrawal/${unlockAddress}`);
-  return res.json();
-}
-
 // ============ Usage example ============
 
 async function main() {
-  if (!FORGEPOOL_ADDRESS) {
-    throw new Error('Set FORGEPOOL_ADDRESS env var');
+  if (!POOL_ADDRESS) {
+    throw new Error('Set POOL_ADDRESS env var');
   }
 
   const unlockAddress: Address = '0x0000000000000000000000000000000000000001'; // TODO: replace
   const recipient: Address = '0x0000000000000000000000000000000000000002'; // TODO: replace
 
-  // 1. Query hongbao status
+  // 1. 查询红包状态
   const status = await getHongbaoStatus(unlockAddress);
 
   if (!status.isLocked) {
@@ -143,20 +161,17 @@ async function main() {
   console.log(`Hongbao: ${status.displayAmount} ${status.tokenSymbol}`);
   console.log(`Expired: ${status.isExpired}`);
 
-  // 2. Get digest for hardware signing
-  const { minFeeBps } = await getFeeRange();
-  const digest = await getWithdrawDigest(unlockAddress, recipient, minFeeBps);
+  // 2. 获取 digest 给硬件签名
+  const digest = await getWithdrawDigest(unlockAddress, recipient);
   console.log(`Digest to sign: ${digest}`);
 
-  // 3. Send digest to hardware device, get back v, r, s
+  // 3. 发送 digest 到硬件设备，拿到 v, r, s
   // const { v, r, s } = await hardwareSign(digest);
 
-  // 4. Submit to relayer
-  // await submitWithdrawal(unlockAddress, recipient, Number(minFeeBps), v, r, s);
-
-  // 5. Poll withdrawal status
-  // const status = await getWithdrawalStatus(unlockAddress);
-  // console.log(status);
+  // 4. 提交 withdraw（Path A 自付 / Path B 代付）
+  // const txHash = await submitWithdrawOnchain(walletClient, unlockAddress, recipient, v, r, s);
+  // or:
+  // await submitWithdrawSponsored(unlockAddress, recipient, v, r, s);
 }
 
 main().catch(console.error);
