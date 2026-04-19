@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-/// @title IHongBaoPool
-/// @notice Standard interface for a single-token, one-shot-signature redeemable
+/// @title IHongBaoTokenPool
+/// @notice Standard interface for a single-ERC20, one-shot-signature redeemable
 ///         lock pool ("red packet"). A pool is bound to exactly one ERC20 token
 ///         at deployment and optionally bound to a single depositor ("initiator").
 ///
@@ -12,7 +12,7 @@ pragma solidity ^0.8.20;
 ///         lifetime. Presentation of that signature redeems the card's full
 ///         balance to `to`. If the card is never redeemed and its lock expires,
 ///         each depositor may reclaim their own contribution.
-interface IHongBaoPool {
+interface IHongBaoTokenPool {
     // ============================================================
     //                           EVENTS
     // ============================================================

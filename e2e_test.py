@@ -5,7 +5,7 @@ HongBao 端到端集成测试
 
 完整流程：
   1. 启动 anvil 本地链
-  2. 部署 MockERC20 + HongBaoPool（直接部署 + 通过 HongBaoFactory）
+  2. 部署 MockERC20 + HongBaoTokenPool（直接部署 + 通过 HongBaoTokenFactory）
   3. 连接 STM32 设备，获取卡片以太坊地址
   4. Initiator 存入代币，锁定到卡片地址
   5. 从合约获取 withdraw digest
@@ -14,7 +14,7 @@ HongBao 端到端集成测试
   8. 测试 withdrawExpired（过期取回）
   9. 测试 batchDeposit
  10. 测试签名不匹配 revert
- 11. 测试 HongBaoFactory.createPool + computePoolAddress
+ 11. 测试 HongBaoTokenFactory.createPool + computePoolAddress
 
 依赖: forge, cast, anvil (foundry), stm32_crypto_wrapper
 """
@@ -45,7 +45,7 @@ RECIPIENT_ADDR = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
 ANVIL_PORT = "18545"
 RPC = f"http://127.0.0.1:{ANVIL_PORT}"
 
-# Must be >= MIN_LOCK_TIME (30 days) in HongBaoPool.
+# Must be >= MIN_LOCK_TIME (30 days) in HongBaoTokenPool.
 LOCK_SECONDS = 30 * 24 * 60 * 60
 WARP_SECONDS = LOCK_SECONDS + 1
 
@@ -176,10 +176,10 @@ def deploy(contract_path, *constructor_args) -> str:
 
 
 def fresh_pool_and_token(initiator=INITIATOR_ADDR):
-    """Deploy fresh MockERC20 + HongBaoPool, fund initiator."""
+    """Deploy fresh MockERC20 + HongBaoTokenPool, fund initiator."""
     token = deploy("test/mocks/MockERC20.sol:MockERC20", "TestToken", "TT", "18")
     pool = deploy(
-        "src/HongBao/HongBaoPool.sol:HongBaoPool",
+        "src/HongBao/token/HongBaoTokenPool.sol:HongBaoTokenPool",
         token,
         initiator,
     )
@@ -379,12 +379,12 @@ def main():
     results.append(("invalid signature revert", ok))
 
     # ================================================================
-    # Test 5: HongBaoFactory — 部署、预测地址、实际部署一致
+    # Test 5: HongBaoTokenFactory — 部署、预测地址、实际部署一致
     # ================================================================
-    print_header(5, "HongBaoFactory.createPool + computePoolAddress")
+    print_header(5, "HongBaoTokenFactory.createPool + computePoolAddress")
 
     token = deploy("test/mocks/MockERC20.sol:MockERC20", "FactoryToken", "FT", "18")
-    factory = deploy("src/HongBao/HongBaoFactory.sol:HongBaoFactory")
+    factory = deploy("src/HongBao/token/HongBaoTokenFactory.sol:HongBaoTokenFactory")
 
     predicted_raw = cast_call(
         factory,

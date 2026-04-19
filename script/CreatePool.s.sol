@@ -2,12 +2,12 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Script.sol";
-import {HongBaoFactory} from "../src/HongBao/HongBaoFactory.sol";
+import {HongBaoTokenFactory} from "../src/HongBao/token/HongBaoTokenFactory.sol";
 
-/// @title CreatePool — deploy a HongBaoPool via the factory
+/// @title CreatePool — deploy a HongBaoTokenPool via the factory
 ///
 /// @notice Environment variables:
-///           FACTORY    — HongBaoFactory address
+///           FACTORY    — HongBaoTokenFactory address
 ///           TOKEN      — ERC20 token to lock
 ///           INITIATOR  — sole depositor; pass 0x0 for open pools
 ///
@@ -19,14 +19,14 @@ import {HongBaoFactory} from "../src/HongBao/HongBaoFactory.sol";
 ///     --broadcast
 contract CreatePool is Script {
     function run() external returns (address pool) {
-        HongBaoFactory factory = HongBaoFactory(vm.envAddress("FACTORY"));
+        HongBaoTokenFactory factory = HongBaoTokenFactory(vm.envAddress("FACTORY"));
         address token = vm.envAddress("TOKEN");
         address initiator = vm.envAddress("INITIATOR");
 
         address predicted = factory.computePoolAddress(token, initiator);
 
         console.log("=========================================");
-        console.log("  HongBaoFactory.createPool");
+        console.log("  HongBaoTokenFactory.createPool");
         console.log("=========================================");
         console.log("Factory:   ", address(factory));
         console.log("Token:     ", token);

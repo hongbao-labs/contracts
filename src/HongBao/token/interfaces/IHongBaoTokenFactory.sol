@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-/// @title IHongBaoFactory
-/// @notice Deterministic registry-factory for `HongBaoPool` instances. Each
-///         (token, initiator) pair maps to at most one pool. The factory is
-///         stateless beyond this registry — it does not administer pools.
+/// @title IHongBaoTokenFactory
+/// @notice Deterministic registry-factory for `HongBaoTokenPool` instances.
+///         Each (token, initiator) pair maps to at most one pool. The factory
+///         is stateless beyond this registry — it does not administer pools.
 ///
 /// @dev    Pools are deployed with CREATE2 using `salt = keccak256(token,
 ///         initiator)`, so their addresses are knowable off-chain before
 ///         deployment via `computePoolAddress`.
-interface IHongBaoFactory {
+interface IHongBaoTokenFactory {
     /// @notice Emitted when a new pool is deployed.
     event PoolCreated(address indexed token, address indexed initiator, address pool);
 

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {IERC20} from "./interfaces/IERC20.sol";
-import {IHongBaoPool} from "./interfaces/IHongBaoPool.sol";
-import {SafeERC20} from "./libraries/SafeERC20.sol";
-import {ReentrancyGuard} from "./utils/ReentrancyGuard.sol";
+import {IERC20} from "../shared/interfaces/IERC20.sol";
+import {IHongBaoTokenPool} from "./interfaces/IHongBaoTokenPool.sol";
+import {SafeERC20} from "../shared/libraries/SafeERC20.sol";
+import {ReentrancyGuard} from "../shared/utils/ReentrancyGuard.sol";
 
-/// @title HongBaoPool
+/// @title HongBaoTokenPool
 /// @notice One-shot signature redeemable lock pool for a single ERC20 token.
 ///
 /// @dev    One pool instance binds exactly one ERC20 token. Each "card" is an
@@ -25,30 +25,30 @@ import {ReentrancyGuard} from "./utils/ReentrancyGuard.sol";
 ///
 ///         This contract holds no administrative privileges: no owner, no
 ///         pause, no upgradability, no fees.
-contract HongBaoPool is IHongBaoPool, ReentrancyGuard {
+contract HongBaoTokenPool is IHongBaoTokenPool, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // ============================================================
     //                          CONSTANTS
     // ============================================================
 
-    /// @inheritdoc IHongBaoPool
+    /// @inheritdoc IHongBaoTokenPool
     uint256 public constant MIN_LOCK_TIME = 30 days;
 
-    /// @inheritdoc IHongBaoPool
+    /// @inheritdoc IHongBaoTokenPool
     bytes32 public constant WITHDRAW_TYPEHASH = keccak256("Withdraw(address unlockAddress,address to)");
 
     // ============================================================
     //                         IMMUTABLES
     // ============================================================
 
-    /// @inheritdoc IHongBaoPool
+    /// @inheritdoc IHongBaoTokenPool
     address public immutable lockedToken;
 
-    /// @inheritdoc IHongBaoPool
+    /// @inheritdoc IHongBaoTokenPool
     address public immutable initiator;
 
-    /// @inheritdoc IHongBaoPool
+    /// @inheritdoc IHongBaoTokenPool
     bytes32 public immutable DOMAIN_SEPARATOR;
 
     // ============================================================
@@ -90,12 +90,12 @@ contract HongBaoPool is IHongBaoPool, ReentrancyGuard {
     //                          DEPOSIT
     // ============================================================
 
-    /// @inheritdoc IHongBaoPool
+    /// @inheritdoc IHongBaoTokenPool
     function deposit(address unlockAddress, uint256 amount, uint256 lockTime) external nonReentrant {
         _deposit(unlockAddress, amount, lockTime);
     }
 
-    /// @inheritdoc IHongBaoPool
+    /// @inheritdoc IHongBaoTokenPool
     function batchDeposit(address[] calldata unlockAddresses, uint256 amount, uint256 lockTime)
         external
         nonReentrant
@@ -138,7 +138,7 @@ contract HongBaoPool is IHongBaoPool, ReentrancyGuard {
     //                  WITHDRAW (DEVICE SIGNATURE)
     // ============================================================
 
-    /// @inheritdoc IHongBaoPool
+    /// @inheritdoc IHongBaoTokenPool
     function withdraw(address unlockAddress, address to, uint8 v, bytes32 r, bytes32 s) external nonReentrant {
         if (to == address(0)) revert ZeroAddress();
 
@@ -161,12 +161,12 @@ contract HongBaoPool is IHongBaoPool, ReentrancyGuard {
     //                      WITHDRAW EXPIRED
     // ============================================================
 
-    /// @inheritdoc IHongBaoPool
+    /// @inheritdoc IHongBaoTokenPool
     function withdrawExpired(address unlockAddress) external nonReentrant {
         _withdrawExpired(unlockAddress);
     }
 
-    /// @inheritdoc IHongBaoPool
+    /// @inheritdoc IHongBaoTokenPool
     function batchWithdrawExpired(address[] calldata unlockAddresses) external nonReentrant {
         uint256 len = unlockAddresses.length;
         if (len == 0) revert EmptyArray();
@@ -212,41 +212,41 @@ contract HongBaoPool is IHongBaoPool, ReentrancyGuard {
     //                            VIEWS
     // ============================================================
 
-    /// @inheritdoc IHongBaoPool
+    /// @inheritdoc IHongBaoTokenPool
     function cardTotal(address unlockAddress) external view returns (uint256) {
         return _cards[unlockAddress].totalAmount;
     }
 
-    /// @inheritdoc IHongBaoPool
+    /// @inheritdoc IHongBaoTokenPool
     function cardExpire(address unlockAddress) external view returns (uint256) {
         return _cards[unlockAddress].expire;
     }
 
-    /// @inheritdoc IHongBaoPool
+    /// @inheritdoc IHongBaoTokenPool
     function cardUnlockedAt(address unlockAddress) external view returns (uint256) {
         return _cards[unlockAddress].unlockedAt;
     }
 
-    /// @inheritdoc IHongBaoPool
+    /// @inheritdoc IHongBaoTokenPool
     function isLocked(address unlockAddress) external view returns (bool) {
         Card storage card = _cards[unlockAddress];
         return card.totalAmount > 0 && card.unlockedAt == 0;
     }
 
-    /// @inheritdoc IHongBaoPool
+    /// @inheritdoc IHongBaoTokenPool
     function isExpired(address unlockAddress) external view returns (bool) {
         Card storage card = _cards[unlockAddress];
         return card.totalAmount > 0 && card.unlockedAt == 0 && block.timestamp >= card.expire;
     }
 
-    /// @inheritdoc IHongBaoPool
+    /// @inheritdoc IHongBaoTokenPool
     function remainingLockTime(address unlockAddress) external view returns (uint256) {
         Card storage card = _cards[unlockAddress];
         if (card.totalAmount == 0 || card.unlockedAt != 0 || block.timestamp >= card.expire) return 0;
         return card.expire - block.timestamp;
     }
 
-    /// @inheritdoc IHongBaoPool
+    /// @inheritdoc IHongBaoTokenPool
     function getWithdrawDigest(address unlockAddress, address to) external view returns (bytes32) {
         return _getDigest(unlockAddress, to);
     }
