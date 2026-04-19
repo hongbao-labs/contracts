@@ -261,9 +261,7 @@ contract HongBaoPoolRestrictedTest is Test {
     function test_withdrawExpired_revert_not_expired() public {
         _deposit100();
         vm.prank(initiator);
-        vm.expectRevert(
-            abi.encodeWithSelector(IHongBaoPool.NotExpired.selector, cardAddr, block.timestamp + MIN_LOCK)
-        );
+        vm.expectRevert(abi.encodeWithSelector(IHongBaoPool.NotExpired.selector, cardAddr, block.timestamp + MIN_LOCK));
         pool.withdrawExpired(cardAddr);
     }
 
@@ -299,7 +297,9 @@ contract HongBaoPoolRestrictedTest is Test {
     function test_batchWithdrawExpired_ok() public {
         uint256[3] memory pks = [uint256(0xB1), uint256(0xB2), uint256(0xB3)];
         address[] memory addrs = new address[](3);
-        for (uint256 i = 0; i < 3; i++) addrs[i] = vm.addr(pks[i]);
+        for (uint256 i = 0; i < 3; i++) {
+            addrs[i] = vm.addr(pks[i]);
+        }
 
         vm.prank(initiator);
         pool.batchDeposit(addrs, 100 ether, MIN_LOCK);
@@ -362,9 +362,7 @@ contract HongBaoPoolRestrictedTest is Test {
         addrs[0] = cardAddr;
 
         vm.prank(initiator);
-        vm.expectRevert(
-            abi.encodeWithSelector(IHongBaoPool.NotExpired.selector, cardAddr, block.timestamp + MIN_LOCK)
-        );
+        vm.expectRevert(abi.encodeWithSelector(IHongBaoPool.NotExpired.selector, cardAddr, block.timestamp + MIN_LOCK));
         pool.batchWithdrawExpired(addrs);
     }
 

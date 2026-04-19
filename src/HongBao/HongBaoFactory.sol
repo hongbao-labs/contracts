@@ -36,10 +36,7 @@ contract HongBaoFactory is IHongBaoFactory {
     /// @inheritdoc IHongBaoFactory
     function computePoolAddress(address token, address initiator) external view returns (address) {
         bytes32 salt = keccak256(abi.encode(token, initiator));
-        bytes32 initCodeHash =
-            keccak256(abi.encodePacked(type(HongBaoPool).creationCode, abi.encode(token, initiator)));
-        return address(
-            uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, initCodeHash))))
-        );
+        bytes32 initCodeHash = keccak256(abi.encodePacked(type(HongBaoPool).creationCode, abi.encode(token, initiator)));
+        return address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, initCodeHash)))));
     }
 }

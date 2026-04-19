@@ -51,9 +51,7 @@ contract HongBaoFactoryTest is Test {
     function test_createPool_duplicate_reverts() public {
         address first = factory.createPool(address(tokenA), initiator);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(IHongBaoFactory.PoolExists.selector, address(tokenA), initiator, first)
-        );
+        vm.expectRevert(abi.encodeWithSelector(IHongBaoFactory.PoolExists.selector, address(tokenA), initiator, first));
         factory.createPool(address(tokenA), initiator);
     }
 

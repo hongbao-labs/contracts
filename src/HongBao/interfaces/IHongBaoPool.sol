@@ -24,11 +24,7 @@ interface IHongBaoPool {
     /// @param newTotal     The resulting `totalAmount` on the card.
     /// @param expire       The card's immutable expiration timestamp.
     event Deposited(
-        address indexed depositor,
-        address indexed unlockAddress,
-        uint256 amount,
-        uint256 newTotal,
-        uint256 expire
+        address indexed depositor, address indexed unlockAddress, uint256 amount, uint256 newTotal, uint256 expire
     );
 
     /// @notice Emitted when a card is redeemed with a valid device signature.

@@ -96,10 +96,7 @@ contract HongBaoPool is IHongBaoPool, ReentrancyGuard {
     }
 
     /// @inheritdoc IHongBaoPool
-    function batchDeposit(address[] calldata unlockAddresses, uint256 amount, uint256 lockTime)
-        external
-        nonReentrant
-    {
+    function batchDeposit(address[] calldata unlockAddresses, uint256 amount, uint256 lockTime) external nonReentrant {
         uint256 len = unlockAddresses.length;
         if (len == 0) revert EmptyArray();
         for (uint256 i = 0; i < len; i++) {
