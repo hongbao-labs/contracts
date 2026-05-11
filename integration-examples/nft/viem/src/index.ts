@@ -41,16 +41,32 @@ const publicClient = createPublicClient({
 
 // ============ Read: hongbao status ============
 
+// lockedCollection is immutable on the pool; cache it after the first read.
+let cachedCollection: Address | undefined;
+
+async function getLockedCollection(): Promise<Address> {
+  if (!cachedCollection) {
+    cachedCollection = await publicClient.readContract({
+      address: POOL_ADDRESS,
+      abi: HongBaoNFTPoolABI,
+      functionName: 'lockedCollection',
+    });
+  }
+  return cachedCollection;
+}
+
 export async function getHongbaoStatus(unlockAddress: Address) {
-  const [tokenId, expire, unlockedAt, collection] = await publicClient.multicall({
-    contracts: [
-      { address: POOL_ADDRESS, abi: HongBaoNFTPoolABI, functionName: 'cardTokenId', args: [unlockAddress] },
-      { address: POOL_ADDRESS, abi: HongBaoNFTPoolABI, functionName: 'cardExpire', args: [unlockAddress] },
-      { address: POOL_ADDRESS, abi: HongBaoNFTPoolABI, functionName: 'cardUnlockedAt', args: [unlockAddress] },
-      { address: POOL_ADDRESS, abi: HongBaoNFTPoolABI, functionName: 'lockedCollection' },
-    ],
-    allowFailure: false,
-  });
+  const [collection, [tokenId, expire, unlockedAt]] = await Promise.all([
+    getLockedCollection(),
+    publicClient.multicall({
+      contracts: [
+        { address: POOL_ADDRESS, abi: HongBaoNFTPoolABI, functionName: 'cardTokenId', args: [unlockAddress] },
+        { address: POOL_ADDRESS, abi: HongBaoNFTPoolABI, functionName: 'cardExpire', args: [unlockAddress] },
+        { address: POOL_ADDRESS, abi: HongBaoNFTPoolABI, functionName: 'cardUnlockedAt', args: [unlockAddress] },
+      ],
+      allowFailure: false,
+    }),
+  ]);
 
   // ERC721 tokenId === 0 is a legal value, so existence must be probed via expire.
   const exists = expire !== 0n;

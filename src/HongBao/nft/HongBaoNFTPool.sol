@@ -202,17 +202,25 @@ contract HongBaoNFTPool is IHongBaoNFTPool, IERC721Receiver, ReentrancyGuard {
 
     /// @inheritdoc IHongBaoNFTPool
     function batchWithdrawExpired(address[] calldata unlockAddresses) external nonReentrant {
-        if (msg.sender != initiator) revert NotInitiator(msg.sender);
+        address _initiator = initiator;
+        if (msg.sender != _initiator) revert NotInitiator(msg.sender);
         uint256 len = unlockAddresses.length;
         if (len == 0) revert EmptyArray();
 
-        for (uint256 i = 0; i < len; i++) {
+        address _collection = lockedCollection;
+        address _self = address(this);
+
+        for (uint256 i = 0; i < len;) {
             address addr = unlockAddresses[i];
             Card storage card = _cards[addr];
 
-            // Silently skip already-released entries and no-deposit slots.
-            if (card.unlockedAt != 0) continue;
-            if (card.expire == 0) continue;
+            if (card.unlockedAt != 0 || card.expire == 0) {
+                emit BatchSkipped(addr);
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
 
             // Not-yet-expired entries hard-revert so the caller notices the
             // programming error instead of silently doing nothing.
@@ -223,11 +231,15 @@ contract HongBaoNFTPool is IHongBaoNFTPool, IERC721Receiver, ReentrancyGuard {
             // Attempt the transfer; if the NFT contract rejects it for any
             // reason (malicious hook, paused collection, etc.), skip this
             // card and leave its state untouched so a later retry is possible.
-            try IERC721(lockedCollection).safeTransferFrom(address(this), initiator, tokenId) {
+            try IERC721(_collection).safeTransferFrom(_self, _initiator, tokenId) {
                 card.unlockedAt = block.timestamp;
-                emit WithdrawnExpired(initiator, addr, tokenId);
+                emit WithdrawnExpired(_initiator, addr, tokenId);
             } catch {
-                continue;
+                emit BatchSkipped(addr);
+            }
+
+            unchecked {
+                ++i;
             }
         }
     }

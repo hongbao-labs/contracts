@@ -60,7 +60,7 @@ async function main() {
     args: [unlockAddress, to],
   });
 
-  const signature = await account.signMessage({ message: { raw: digest } });
+  const signature = await account.sign({ hash: digest });
 
   const r = `0x${signature.slice(2, 66)}` as Hex;
   const s = `0x${signature.slice(66, 130)}` as Hex;

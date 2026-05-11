@@ -99,8 +99,11 @@ contract HongBaoTokenPool is IHongBaoTokenPool, ReentrancyGuard {
     function batchDeposit(address[] calldata unlockAddresses, uint256 amount, uint256 lockTime) external nonReentrant {
         uint256 len = unlockAddresses.length;
         if (len == 0) revert EmptyArray();
-        for (uint256 i = 0; i < len; i++) {
+        for (uint256 i = 0; i < len;) {
             _deposit(unlockAddresses[i], amount, lockTime);
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -167,24 +170,41 @@ contract HongBaoTokenPool is IHongBaoTokenPool, ReentrancyGuard {
     function batchWithdrawExpired(address[] calldata unlockAddresses) external nonReentrant {
         uint256 len = unlockAddresses.length;
         if (len == 0) revert EmptyArray();
-        for (uint256 i = 0; i < len; i++) {
+
+        address _token = lockedToken;
+
+        for (uint256 i = 0; i < len;) {
             address addr = unlockAddresses[i];
             Card storage card = _cards[addr];
 
             // Skip entries that have already been redeemed via signature, and
             // entries on which the caller has nothing to claim.
-            if (card.unlockedAt != 0) continue;
+            if (card.unlockedAt != 0) {
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
             uint256 share = depositRecord[addr][msg.sender];
-            if (share == 0) continue;
+            if (share == 0) {
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
 
             if (block.timestamp < card.expire) revert NotExpired(addr, card.expire);
 
             depositRecord[addr][msg.sender] = 0;
             card.totalAmount -= share;
 
-            IERC20(lockedToken).safeTransfer(msg.sender, share);
+            IERC20(_token).safeTransfer(msg.sender, share);
 
             emit WithdrawnExpired(msg.sender, addr, share);
+
+            unchecked {
+                ++i;
+            }
         }
     }
 

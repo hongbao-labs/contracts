@@ -29,6 +29,10 @@ interface IHongBaoNFTPool {
     /// @notice Emitted when `initiator` reclaims an expired card's NFT.
     event WithdrawnExpired(address indexed initiator, address indexed unlockAddress, uint256 indexed tokenId);
 
+    /// @notice Emitted inside `batchWithdrawExpired` when an entry is skipped
+    ///         (already released, no deposit, or `safeTransferFrom` rejected).
+    event BatchSkipped(address indexed unlockAddress);
+
     // ============================================================
     //                           ERRORS
     // ============================================================
