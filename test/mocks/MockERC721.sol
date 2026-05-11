@@ -24,6 +24,8 @@ contract MockERC721 {
     // failure paths like batchWithdrawExpired's per-entry catch.
     mapping(uint256 => bool) public cursed;
 
+    uint256 internal _freeMintCursor;
+
     error NotOwner();
     error NotAuthorized();
     error AlreadyMinted();
@@ -40,6 +42,21 @@ contract MockERC721 {
         if (to == address(0)) revert TransferToZero();
         if (ownerOf[tokenId] != address(0)) revert AlreadyMinted();
         ownerOf[tokenId] = to;
+    }
+
+    /// @notice Permissionless self-mint. Anyone can call to receive a fresh
+    ///         tokenId; the cursor skips slots already claimed via `mint`.
+    function freeMint() external returns (uint256 tokenId) {
+        tokenId = _freeMintCursor;
+        while (ownerOf[tokenId] != address(0)) {
+            unchecked {
+                tokenId++;
+            }
+        }
+        unchecked {
+            _freeMintCursor = tokenId + 1;
+        }
+        ownerOf[tokenId] = msg.sender;
     }
 
     function curse(uint256 tokenId) external {
