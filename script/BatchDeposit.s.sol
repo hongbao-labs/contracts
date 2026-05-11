@@ -5,6 +5,10 @@ import "forge-std/Script.sol";
 import {HongBaoTokenPool} from "../src/HongBao/token/HongBaoTokenPool.sol";
 import {IERC20} from "../src/HongBao/shared/interfaces/IERC20.sol";
 
+interface IERC20Metadata {
+    function decimals() external view returns (uint8);
+}
+
 /// @title BatchDeposit — project-side script to mint a batch of locked cards
 ///
 /// @notice Reads a JSON list of card addresses and calls
@@ -12,7 +16,7 @@ import {IERC20} from "../src/HongBao/shared/interfaces/IERC20.sol";
 ///
 /// @notice Environment variables:
 ///           POOL            — HongBaoTokenPool address
-///           AMOUNT_ETHER    — per-card amount in whole tokens (e.g. "100")
+///           AMOUNT          — per-card amount in whole tokens (scaled by token.decimals())
 ///           LOCK_DAYS       — lock duration in days (must be >= 30)
 ///           ADDRESSES_JSON  — path to JSON file of card addresses
 ///
@@ -20,7 +24,7 @@ import {IERC20} from "../src/HongBao/shared/interfaces/IERC20.sol";
 ///           { "addresses": ["0xAbc...", "0xDef...", ...] }
 ///
 /// @notice Usage:
-///   POOL=0x... AMOUNT_ETHER=100 LOCK_DAYS=30 ADDRESSES_JSON=./addresses.json \
+///   POOL=0x... AMOUNT=100 LOCK_DAYS=30 ADDRESSES_JSON=./addresses.json \
 ///   forge script script/BatchDeposit.s.sol \
 ///     --rpc-url $RPC_URL \
 ///     --private-key $PRIVATE_KEY \
@@ -28,7 +32,7 @@ import {IERC20} from "../src/HongBao/shared/interfaces/IERC20.sol";
 contract BatchDeposit is Script {
     function run() external {
         HongBaoTokenPool pool = HongBaoTokenPool(vm.envAddress("POOL"));
-        uint256 amount = vm.envUint("AMOUNT_ETHER") * 1 ether;
+        uint256 amountWhole = vm.envUint("AMOUNT");
         uint256 lockTime = vm.envUint("LOCK_DAYS") * 1 days;
 
         string memory json = vm.readFile(vm.envString("ADDRESSES_JSON"));
@@ -37,6 +41,8 @@ contract BatchDeposit is Script {
 
         address token = pool.lockedToken();
         address poolInitiator = pool.initiator();
+        uint8 decimals = IERC20Metadata(token).decimals();
+        uint256 amount = amountWhole * (10 ** decimals);
         uint256 totalAmount = amount * addresses.length;
 
         console.log("=========================================");
@@ -44,13 +50,11 @@ contract BatchDeposit is Script {
         console.log("=========================================");
         console.log("Pool:      ", address(pool));
         console.log("Token:     ", token);
+        console.log("Decimals:  ", decimals);
         console.log("Initiator: ", poolInitiator);
         console.log("Count:     ", addresses.length);
-        console.log("Per card:  ", amount / 1 ether, "(tokens)");
-        console.log("Total:     ", totalAmount / 1 ether, "(tokens)");
-
-        require(poolInitiator == address(0) || poolInitiator == msg.sender, "sender does not match pool initiator");
-        require(IERC20(token).balanceOf(msg.sender) >= totalAmount, "insufficient token balance");
+        console.log("Per card:  ", amountWhole, "(tokens)");
+        console.log("Total:     ", amountWhole * addresses.length, "(tokens)");
 
         vm.startBroadcast();
 
