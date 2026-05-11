@@ -125,18 +125,14 @@ export function computeWithdrawDigest(params: {
     ),
   );
 
-  const digest = keccak256(
-    concatHex(['0x1901', params.domainSeparator, structHash]),
-  );
+  const digest = keccak256(concatHex(['0x1901', params.domainSeparator, structHash]));
 
   return { structHash, digest };
 }
 
 // ============ Recipient pre-check ============
 
-const ERC165_ABI = parseAbi([
-  'function supportsInterface(bytes4 interfaceId) view returns (bool)',
-]);
+const ERC165_ABI = parseAbi(['function supportsInterface(bytes4 interfaceId) view returns (bool)']);
 
 const IERC721_RECEIVER_INTERFACE_ID = '0x150b7a02' as Hex;
 

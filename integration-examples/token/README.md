@@ -155,7 +155,7 @@ app 连接钱包
 | `RPC_URL` | 是 | RPC 节点地址 |
 
 ```bash
-cd integration-examples/token/viem
+cd integration-examples
 npm install
-npx tsx src/index.ts
+npm run example:token
 ```

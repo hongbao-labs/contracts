@@ -18,14 +18,7 @@
 
 import { createInterface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
-import {
-  keccak256,
-  encodeAbiParameters,
-  concatHex,
-  isAddress,
-  type Address,
-  type Hex,
-} from 'viem';
+import { keccak256, encodeAbiParameters, concatHex, isAddress, type Address, type Hex } from 'viem';
 
 // ============ Types ============
 
@@ -115,9 +108,7 @@ export function computeWithdrawDigest(params: {
     ),
   );
 
-  const digest = keccak256(
-    concatHex(['0x1901', params.domainSeparator, structHash]),
-  );
+  const digest = keccak256(concatHex(['0x1901', params.domainSeparator, structHash]));
 
   return { structHash, digest };
 }

@@ -21,13 +21,7 @@
  *     npx tsx src/sign.ts
  */
 
-import {
-  createPublicClient,
-  http,
-  parseAbi,
-  type Address,
-  type Hex,
-} from 'viem';
+import { createPublicClient, http, parseAbi, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
 const HongBaoNFTPoolABI = parseAbi([

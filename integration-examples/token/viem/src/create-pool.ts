@@ -20,15 +20,7 @@
  *     npx tsx src/create-pool.ts
  */
 
-import {
-  createPublicClient,
-  createWalletClient,
-  http,
-  parseAbi,
-  zeroAddress,
-  type Address,
-  type Hex,
-} from 'viem';
+import { createPublicClient, createWalletClient, http, parseAbi, zeroAddress, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
 const HongBaoTokenFactoryABI = parseAbi([

@@ -1,12 +1,4 @@
-import {
-  createPublicClient,
-  http,
-  erc20Abi,
-  parseAbi,
-  formatUnits,
-  type Address,
-  type Hex,
-} from 'viem';
+import { createPublicClient, http, erc20Abi, parseAbi, formatUnits, type Address, type Hex } from 'viem';
 import { mainnet } from 'viem/chains';
 
 const HongBaoTokenPoolABI = parseAbi([
@@ -120,13 +112,7 @@ export async function getWithdrawDigest(unlockAddress: Address, to: Address) {
  */
 const SPONSOR_API = process.env.SPONSOR_API;
 
-export async function submitWithdrawSponsored(
-  unlockAddress: Address,
-  to: Address,
-  v: number,
-  r: Hex,
-  s: Hex,
-) {
+export async function submitWithdrawSponsored(unlockAddress: Address, to: Address, v: number, r: Hex, s: Hex) {
   if (!SPONSOR_API) throw new Error('SPONSOR_API not configured');
   const res = await fetch(`${SPONSOR_API}/api/withdrawal`, {
     method: 'POST',
