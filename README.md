@@ -170,11 +170,14 @@ NFT 没有 `batchDeposit` —— 一张卡只持有一个 tokenId，批量在脚
 # 编译
 forge build
 
-# 跑全量测试（49 tests，目前覆盖 Token 变体）
+# 跑全量测试（71 tests，覆盖 Token / NFT 变体）
 forge test -vv
 
 # 仅 Token 测试
 forge test --match-path "test/HongBaoToken*.t.sol" -vv
+
+# 仅 NFT 测试
+forge test --match-path "test/HongBaoNFT*.t.sol" -vv
 ```
 
 ### 测试覆盖
@@ -182,9 +185,9 @@ forge test --match-path "test/HongBaoToken*.t.sol" -vv
 - **HongBaoTokenPool 限定模式（33 tests）**: deposit / batchDeposit / topup / withdraw / withdrawExpired / batchWithdrawExpired（含跳过已兑付与零份额的用例）/ views / 构造参数校验
 - **HongBaoTokenPool 开放模式（4 tests）**: 多 depositor 同一卡 / 一次 withdraw 清扫所有 depositor / 过期按份额取回 / 抢跑 grief 场景
 - **HongBaoTokenFactory（8 tests）**: `createPool` 正常 / 重复 `PoolExists` / `computePoolAddress` 与实际部署地址一致 / 开放模式 pool / 不同 (token, initiator) 组合
+- **HongBaoNFTPool（19 tests）**: pull / push deposit / withdraw / withdrawExpired / batchWithdrawExpired / 接收方兼容性 / views / 构造参数校验
+- **HongBaoNFTFactory（3 tests）**: `createPool` 正常 / 重复 `PoolExists` / `computePoolAddress` 与实际部署地址一致
 - **SignTest（4 tests）**: 设备签名与 EVM `ecrecover` 兼容性
-
-NFT 变体的单元测试待补。
 
 ## 部署脚本
 
@@ -209,6 +212,11 @@ forge script script/BatchDeposit.s.sol --rpc-url $RPC --private-key $PK --broadc
 ```
 
 ### NFT 变体
+
+> ⚠️ **Collection 尽调（部署方责任，Factory 不校验）**：合约信任 `lockedCollection` 忠实遵循 ERC721。可升级 / 恶意 collection 可以注册幽灵卡永久 brick `unlockAddress`。建议：
+> - 非升级合约（无 EIP-1967 proxy slot）
+> - 来源可信 / 经过审计
+> - `safeTransferFrom`、`transferFrom`、`ownerOf` 行为标准
 
 ```bash
 # 1. 部署 Factory（一次性）

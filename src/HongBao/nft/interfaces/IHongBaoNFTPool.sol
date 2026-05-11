@@ -29,9 +29,14 @@ interface IHongBaoNFTPool {
     /// @notice Emitted when `initiator` reclaims an expired card's NFT.
     event WithdrawnExpired(address indexed initiator, address indexed unlockAddress, uint256 indexed tokenId);
 
-    /// @notice Emitted inside `batchWithdrawExpired` when an entry is skipped
-    ///         (already released, no deposit, or `safeTransferFrom` rejected).
+    /// @notice Benign skip inside `batchWithdrawExpired` — entry was already
+    ///         released or never deposited. No operator action needed.
     event BatchSkipped(address indexed unlockAddress);
+
+    /// @notice Per-entry `safeTransferFrom` reverted inside
+    ///         `batchWithdrawExpired`. Card state preserved for retry —
+    ///         needs operator attention.
+    event BatchTransferFailed(address indexed unlockAddress, uint256 indexed tokenId);
 
     // ============================================================
     //                           ERRORS
@@ -119,11 +124,9 @@ interface IHongBaoNFTPool {
     ///         card's NFT.
     function withdrawExpired(address unlockAddress) external;
 
-    /// @notice Batch variant of `withdrawExpired`. Entries already released
-    ///         (signature-redeemed or previously reclaimed) and entries with no
-    ///         deposit are silently skipped. Entries whose lock has not yet
-    ///         expired cause the batch to revert. Individual `safeTransferFrom`
-    ///         failures are also skipped so one bad entry does not poison the
-    ///         whole batch.
+    /// @notice Batch variant of `withdrawExpired`. Already-released and
+    ///         never-deposited entries are skipped (`BatchSkipped`).
+    ///         Not-yet-expired entries revert the batch. Per-entry transfer
+    ///         failures are isolated and emit `BatchTransferFailed`.
     function batchWithdrawExpired(address[] calldata unlockAddresses) external;
 }

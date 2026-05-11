@@ -276,7 +276,7 @@ contract HongBaoNFTPoolTest is Test {
         assertEq(pool.cardUnlockedAt(cardOld), 0);
     }
 
-    function test_batchWithdrawExpired_skip_on_transfer_failure() public {
+    function test_batchWithdrawExpired_emits_transfer_failed() public {
         address card1 = vm.addr(0x1);
         address card2 = vm.addr(0x2);
 
@@ -292,8 +292,8 @@ contract HongBaoNFTPoolTest is Test {
         addrs[0] = card1;
         addrs[1] = card2;
 
-        vm.expectEmit(true, false, false, true);
-        emit IHongBaoNFTPool.BatchSkipped(card1);
+        vm.expectEmit(true, true, false, false);
+        emit IHongBaoNFTPool.BatchTransferFailed(card1, 1);
 
         vm.prank(initiator);
         pool.batchWithdrawExpired(addrs);

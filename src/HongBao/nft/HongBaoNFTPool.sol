@@ -31,6 +31,13 @@ import {ReentrancyGuard} from "../shared/utils/ReentrancyGuard.sol";
 ///         destroys the NFT for that card. Clients MUST validate `to` before
 ///         asking the device to sign — preferably an EOA.
 ///
+///         TRUST ASSUMPTION: `lockedCollection` MUST follow the ERC721
+///         standard faithfully. A malicious or upgradeable collection can
+///         register phantom cards (no NFT held) and permanently brick
+///         `unlockAddress` slots, since cards are one-shot. Deployers MUST
+///         vet the collection — preferably non-upgradeable. Not enforced
+///         by the factory.
+///
 ///         This contract holds no administrative privileges: no owner, no
 ///         pause, no upgradability, no fees.
 contract HongBaoNFTPool is IHongBaoNFTPool, IERC721Receiver, ReentrancyGuard {
@@ -235,7 +242,7 @@ contract HongBaoNFTPool is IHongBaoNFTPool, IERC721Receiver, ReentrancyGuard {
                 card.unlockedAt = block.timestamp;
                 emit WithdrawnExpired(_initiator, addr, tokenId);
             } catch {
-                emit BatchSkipped(addr);
+                emit BatchTransferFailed(addr, tokenId);
             }
 
             unchecked {
