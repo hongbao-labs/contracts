@@ -49,10 +49,7 @@ contract BatchDeposit is Script {
         console.log("Per card:  ", amount / 1 ether, "(tokens)");
         console.log("Total:     ", totalAmount / 1 ether, "(tokens)");
 
-        require(
-            poolInitiator == address(0) || poolInitiator == msg.sender,
-            "sender does not match pool initiator"
-        );
+        require(poolInitiator == address(0) || poolInitiator == msg.sender, "sender does not match pool initiator");
         require(IERC20(token).balanceOf(msg.sender) >= totalAmount, "insufficient token balance");
 
         vm.startBroadcast();

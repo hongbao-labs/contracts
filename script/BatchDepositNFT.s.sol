@@ -65,8 +65,7 @@ contract BatchDepositNFT is Script {
         for (uint256 i = 0; i < unlockAddresses.length; i++) {
             tokenIds[i] = vm.parseUint(tokenIdStrs[i]);
             require(
-                IERC721(collection).ownerOf(tokenIds[i]) == msg.sender,
-                "sender does not own one of the listed tokenIds"
+                IERC721(collection).ownerOf(tokenIds[i]) == msg.sender, "sender does not own one of the listed tokenIds"
             );
         }
 

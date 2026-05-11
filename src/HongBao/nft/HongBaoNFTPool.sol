@@ -123,7 +123,11 @@ contract HongBaoNFTPool is IHongBaoNFTPool, IERC721Receiver, ReentrancyGuard {
         address from,
         uint256 tokenId,
         bytes calldata data
-    ) external nonReentrant returns (bytes4) {
+    )
+        external
+        nonReentrant
+        returns (bytes4)
+    {
         if (msg.sender != lockedCollection) revert WrongCollection(msg.sender);
         if (from != initiator) revert NotInitiator(from);
         // abi.encode(address, uint256) is exactly 64 bytes.
@@ -135,12 +139,7 @@ contract HongBaoNFTPool is IHongBaoNFTPool, IERC721Receiver, ReentrancyGuard {
         return IERC721Receiver.onERC721Received.selector;
     }
 
-    function _registerDeposit(
-        address depositor,
-        address unlockAddress,
-        uint256 tokenId,
-        uint256 lockTime
-    ) internal {
+    function _registerDeposit(address depositor, address unlockAddress, uint256 tokenId, uint256 lockTime) internal {
         if (unlockAddress == address(0)) revert ZeroAddress();
         if (lockTime < MIN_LOCK_TIME) revert LockTimeTooShort(lockTime, MIN_LOCK_TIME);
 

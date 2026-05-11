@@ -37,8 +37,6 @@ contract HongBaoNFTFactory is IHongBaoNFTFactory {
         bytes32 salt = keccak256(abi.encode(collection, initiator));
         bytes32 initCodeHash =
             keccak256(abi.encodePacked(type(HongBaoNFTPool).creationCode, abi.encode(collection, initiator)));
-        return address(
-            uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, initCodeHash))))
-        );
+        return address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, initCodeHash)))));
     }
 }

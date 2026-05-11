@@ -299,7 +299,9 @@ contract HongBaoTokenPoolRestrictedTest is Test {
     function test_batchWithdrawExpired_ok() public {
         uint256[3] memory pks = [uint256(0xB1), uint256(0xB2), uint256(0xB3)];
         address[] memory addrs = new address[](3);
-        for (uint256 i = 0; i < 3; i++) addrs[i] = vm.addr(pks[i]);
+        for (uint256 i = 0; i < 3; i++) {
+            addrs[i] = vm.addr(pks[i]);
+        }
 
         vm.prank(initiator);
         pool.batchDeposit(addrs, 100 ether, MIN_LOCK);

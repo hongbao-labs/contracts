@@ -38,8 +38,6 @@ contract HongBaoTokenFactory is IHongBaoTokenFactory {
         bytes32 salt = keccak256(abi.encode(token, initiator));
         bytes32 initCodeHash =
             keccak256(abi.encodePacked(type(HongBaoTokenPool).creationCode, abi.encode(token, initiator)));
-        return address(
-            uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, initCodeHash))))
-        );
+        return address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, initCodeHash)))));
     }
 }

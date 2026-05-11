@@ -21,12 +21,7 @@ interface IHongBaoNFTPool {
     // ============================================================
 
     /// @notice Emitted on a successful deposit (pull or push path).
-    event Deposited(
-        address indexed depositor,
-        address indexed unlockAddress,
-        uint256 indexed tokenId,
-        uint256 expire
-    );
+    event Deposited(address indexed depositor, address indexed unlockAddress, uint256 indexed tokenId, uint256 expire);
 
     /// @notice Emitted when a card is redeemed with a valid device signature.
     event Withdrawn(address indexed unlockAddress, address indexed to, uint256 indexed tokenId);
