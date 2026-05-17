@@ -2,9 +2,9 @@
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
-import {HongBaoPool} from "../src/HongBao/HongBaoPool.sol";
-import {IHongBaoPool} from "../src/HongBao/interfaces/IHongBaoPool.sol";
-import {ReentrancyGuard} from "../src/HongBao/utils/ReentrancyGuard.sol";
+import {HongBaoTokenPool} from "../src/HongBao/token/HongBaoTokenPool.sol";
+import {IHongBaoTokenPool} from "../src/HongBao/token/interfaces/IHongBaoTokenPool.sol";
+import {ReentrancyGuard} from "../src/HongBao/shared/utils/ReentrancyGuard.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 
 // ================================================================
@@ -12,8 +12,8 @@ import {MockERC20} from "./mocks/MockERC20.sol";
 //           (initiator != 0: only initiator may deposit)
 // ================================================================
 
-contract HongBaoPoolRestrictedTest is Test {
-    HongBaoPool public pool;
+contract HongBaoTokenPoolRestrictedTest is Test {
+    HongBaoTokenPool public pool;
     MockERC20 public token;
 
     address initiator = address(0xA);
@@ -25,7 +25,7 @@ contract HongBaoPoolRestrictedTest is Test {
 
     function setUp() public {
         token = new MockERC20("TestToken", "TT", 18);
-        pool = new HongBaoPool(address(token), initiator);
+        pool = new HongBaoTokenPool(address(token), initiator);
         cardAddr = vm.addr(cardPk);
 
         token.mint(initiator, 10000 ether);
@@ -52,8 +52,8 @@ contract HongBaoPoolRestrictedTest is Test {
     // ---- constructor ----
 
     function test_constructor_zero_token_reverts() public {
-        vm.expectRevert(IHongBaoPool.ZeroAddress.selector);
-        new HongBaoPool(address(0), initiator);
+        vm.expectRevert(IHongBaoTokenPool.ZeroAddress.selector);
+        new HongBaoTokenPool(address(0), initiator);
     }
 
     function test_constructor_sets_immutables() public view {
@@ -82,25 +82,25 @@ contract HongBaoPoolRestrictedTest is Test {
         token.approve(address(pool), type(uint256).max);
 
         vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSelector(IHongBaoPool.NotInitiator.selector, stranger));
+        vm.expectRevert(abi.encodeWithSelector(IHongBaoTokenPool.NotInitiator.selector, stranger));
         pool.deposit(cardAddr, 100 ether, MIN_LOCK);
     }
 
     function test_deposit_revert_zero_amount() public {
         vm.prank(initiator);
-        vm.expectRevert(IHongBaoPool.ZeroAmount.selector);
+        vm.expectRevert(IHongBaoTokenPool.ZeroAmount.selector);
         pool.deposit(cardAddr, 0, MIN_LOCK);
     }
 
     function test_deposit_revert_zero_unlockAddress() public {
         vm.prank(initiator);
-        vm.expectRevert(IHongBaoPool.ZeroAddress.selector);
+        vm.expectRevert(IHongBaoTokenPool.ZeroAddress.selector);
         pool.deposit(address(0), 100 ether, MIN_LOCK);
     }
 
     function test_deposit_revert_lock_time_too_short() public {
         vm.prank(initiator);
-        vm.expectRevert(abi.encodeWithSelector(IHongBaoPool.LockTimeTooShort.selector, MIN_LOCK - 1, MIN_LOCK));
+        vm.expectRevert(abi.encodeWithSelector(IHongBaoTokenPool.LockTimeTooShort.selector, MIN_LOCK - 1, MIN_LOCK));
         pool.deposit(cardAddr, 100 ether, MIN_LOCK - 1);
     }
 
@@ -123,7 +123,7 @@ contract HongBaoPoolRestrictedTest is Test {
         vm.warp(block.timestamp + MIN_LOCK);
 
         vm.prank(initiator);
-        vm.expectRevert(abi.encodeWithSelector(IHongBaoPool.CardExpired.selector, cardAddr));
+        vm.expectRevert(abi.encodeWithSelector(IHongBaoTokenPool.CardExpired.selector, cardAddr));
         pool.deposit(cardAddr, 1 ether, 0);
     }
 
@@ -133,7 +133,7 @@ contract HongBaoPoolRestrictedTest is Test {
         pool.withdraw(cardAddr, recipient, v, r, s);
 
         vm.prank(initiator);
-        vm.expectRevert(abi.encodeWithSelector(IHongBaoPool.AlreadyUnlocked.selector, cardAddr));
+        vm.expectRevert(abi.encodeWithSelector(IHongBaoTokenPool.AlreadyUnlocked.selector, cardAddr));
         pool.deposit(cardAddr, 1 ether, MIN_LOCK);
     }
 
@@ -158,7 +158,7 @@ contract HongBaoPoolRestrictedTest is Test {
     function test_batchDeposit_empty_array_reverts() public {
         address[] memory addrs = new address[](0);
         vm.prank(initiator);
-        vm.expectRevert(IHongBaoPool.EmptyArray.selector);
+        vm.expectRevert(IHongBaoTokenPool.EmptyArray.selector);
         pool.batchDeposit(addrs, 50 ether, MIN_LOCK);
     }
 
@@ -206,13 +206,13 @@ contract HongBaoPoolRestrictedTest is Test {
         _deposit100();
         (uint8 v, bytes32 r, bytes32 s) = _sign(0xDEAD, recipient);
 
-        vm.expectRevert(IHongBaoPool.InvalidSignature.selector);
+        vm.expectRevert(IHongBaoTokenPool.InvalidSignature.selector);
         pool.withdraw(cardAddr, recipient, v, r, s);
     }
 
     function test_withdraw_revert_no_deposit() public {
         (uint8 v, bytes32 r, bytes32 s) = _sign(cardPk, recipient);
-        vm.expectRevert(abi.encodeWithSelector(IHongBaoPool.NoDeposit.selector, cardAddr));
+        vm.expectRevert(abi.encodeWithSelector(IHongBaoTokenPool.NoDeposit.selector, cardAddr));
         pool.withdraw(cardAddr, recipient, v, r, s);
     }
 
@@ -221,14 +221,14 @@ contract HongBaoPoolRestrictedTest is Test {
         (uint8 v, bytes32 r, bytes32 s) = _sign(cardPk, recipient);
         pool.withdraw(cardAddr, recipient, v, r, s);
 
-        vm.expectRevert(abi.encodeWithSelector(IHongBaoPool.AlreadyUnlocked.selector, cardAddr));
+        vm.expectRevert(abi.encodeWithSelector(IHongBaoTokenPool.AlreadyUnlocked.selector, cardAddr));
         pool.withdraw(cardAddr, recipient, v, r, s);
     }
 
     function test_withdraw_revert_zero_to() public {
         _deposit100();
         (uint8 v, bytes32 r, bytes32 s) = _sign(cardPk, address(0));
-        vm.expectRevert(IHongBaoPool.ZeroAddress.selector);
+        vm.expectRevert(IHongBaoTokenPool.ZeroAddress.selector);
         pool.withdraw(cardAddr, address(0), v, r, s);
     }
 
@@ -261,7 +261,9 @@ contract HongBaoPoolRestrictedTest is Test {
     function test_withdrawExpired_revert_not_expired() public {
         _deposit100();
         vm.prank(initiator);
-        vm.expectRevert(abi.encodeWithSelector(IHongBaoPool.NotExpired.selector, cardAddr, block.timestamp + MIN_LOCK));
+        vm.expectRevert(
+            abi.encodeWithSelector(IHongBaoTokenPool.NotExpired.selector, cardAddr, block.timestamp + MIN_LOCK)
+        );
         pool.withdrawExpired(cardAddr);
     }
 
@@ -271,13 +273,13 @@ contract HongBaoPoolRestrictedTest is Test {
 
         address stranger = address(0xBAD);
         vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSelector(IHongBaoPool.NoShare.selector, cardAddr, stranger));
+        vm.expectRevert(abi.encodeWithSelector(IHongBaoTokenPool.NoShare.selector, cardAddr, stranger));
         pool.withdrawExpired(cardAddr);
     }
 
     function test_withdrawExpired_revert_no_deposit() public {
         address empty = address(0xDEAD);
-        vm.expectRevert(abi.encodeWithSelector(IHongBaoPool.NoDeposit.selector, empty));
+        vm.expectRevert(abi.encodeWithSelector(IHongBaoTokenPool.NoDeposit.selector, empty));
         pool.withdrawExpired(empty);
     }
 
@@ -288,7 +290,7 @@ contract HongBaoPoolRestrictedTest is Test {
 
         vm.warp(block.timestamp + MIN_LOCK + 1);
         vm.prank(initiator);
-        vm.expectRevert(abi.encodeWithSelector(IHongBaoPool.AlreadyUnlocked.selector, cardAddr));
+        vm.expectRevert(abi.encodeWithSelector(IHongBaoTokenPool.AlreadyUnlocked.selector, cardAddr));
         pool.withdrawExpired(cardAddr);
     }
 
@@ -362,14 +364,16 @@ contract HongBaoPoolRestrictedTest is Test {
         addrs[0] = cardAddr;
 
         vm.prank(initiator);
-        vm.expectRevert(abi.encodeWithSelector(IHongBaoPool.NotExpired.selector, cardAddr, block.timestamp + MIN_LOCK));
+        vm.expectRevert(
+            abi.encodeWithSelector(IHongBaoTokenPool.NotExpired.selector, cardAddr, block.timestamp + MIN_LOCK)
+        );
         pool.batchWithdrawExpired(addrs);
     }
 
     function test_batchWithdrawExpired_empty_array_reverts() public {
         address[] memory addrs = new address[](0);
         vm.prank(initiator);
-        vm.expectRevert(IHongBaoPool.EmptyArray.selector);
+        vm.expectRevert(IHongBaoTokenPool.EmptyArray.selector);
         pool.batchWithdrawExpired(addrs);
     }
 
@@ -411,8 +415,8 @@ contract HongBaoPoolRestrictedTest is Test {
 //         (initiator == 0: anyone may deposit / top-up)
 // ================================================================
 
-contract HongBaoPoolOpenTest is Test {
-    HongBaoPool public pool;
+contract HongBaoTokenPoolOpenTest is Test {
+    HongBaoTokenPool public pool;
     MockERC20 public token;
 
     address alice = address(0xA1);
@@ -425,7 +429,7 @@ contract HongBaoPoolOpenTest is Test {
 
     function setUp() public {
         token = new MockERC20("TestToken", "TT", 18);
-        pool = new HongBaoPool(address(token), address(0));
+        pool = new HongBaoTokenPool(address(token), address(0));
         cardAddr = vm.addr(cardPk);
 
         token.mint(alice, 10000 ether);

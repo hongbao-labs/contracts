@@ -2,8 +2,8 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Script.sol";
-import {HongBaoPool} from "../src/HongBao/HongBaoPool.sol";
-import {IERC20} from "../src/HongBao/interfaces/IERC20.sol";
+import {HongBaoTokenPool} from "../src/HongBao/token/HongBaoTokenPool.sol";
+import {IERC20} from "../src/HongBao/shared/interfaces/IERC20.sol";
 
 interface IERC20Metadata {
     function decimals() external view returns (uint8);
@@ -12,10 +12,10 @@ interface IERC20Metadata {
 /// @title BatchDeposit — project-side script to mint a batch of locked cards
 ///
 /// @notice Reads a JSON list of card addresses and calls
-///         `HongBaoPool.batchDeposit`.
+///         `HongBaoTokenPool.batchDeposit`.
 ///
 /// @notice Environment variables:
-///           POOL            — HongBaoPool address
+///           POOL            — HongBaoTokenPool address
 ///           AMOUNT          — per-card amount in whole tokens (scaled by token.decimals())
 ///           LOCK_DAYS       — lock duration in days (must be >= 30)
 ///           ADDRESSES_JSON  — path to JSON file of card addresses
@@ -31,7 +31,7 @@ interface IERC20Metadata {
 ///     --broadcast
 contract BatchDeposit is Script {
     function run() external {
-        HongBaoPool pool = HongBaoPool(vm.envAddress("POOL"));
+        HongBaoTokenPool pool = HongBaoTokenPool(vm.envAddress("POOL"));
         uint256 amountWhole = vm.envUint("AMOUNT");
         uint256 lockTime = vm.envUint("LOCK_DAYS") * 1 days;
 
@@ -46,7 +46,7 @@ contract BatchDeposit is Script {
         uint256 totalAmount = amount * addresses.length;
 
         console.log("=========================================");
-        console.log("  HongBaoPool.batchDeposit");
+        console.log("  HongBaoTokenPool.batchDeposit");
         console.log("=========================================");
         console.log("Pool:      ", address(pool));
         console.log("Token:     ", token);

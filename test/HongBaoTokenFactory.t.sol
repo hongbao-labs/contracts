@@ -2,20 +2,20 @@
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
-import {HongBaoFactory} from "../src/HongBao/HongBaoFactory.sol";
-import {HongBaoPool} from "../src/HongBao/HongBaoPool.sol";
-import {IHongBaoFactory} from "../src/HongBao/interfaces/IHongBaoFactory.sol";
+import {HongBaoTokenFactory} from "../src/HongBao/token/HongBaoTokenFactory.sol";
+import {HongBaoTokenPool} from "../src/HongBao/token/HongBaoTokenPool.sol";
+import {IHongBaoTokenFactory} from "../src/HongBao/token/interfaces/IHongBaoTokenFactory.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 
-contract HongBaoFactoryTest is Test {
-    HongBaoFactory public factory;
+contract HongBaoTokenFactoryTest is Test {
+    HongBaoTokenFactory public factory;
     MockERC20 public tokenA;
     MockERC20 public tokenB;
 
     address initiator = address(0xA);
 
     function setUp() public {
-        factory = new HongBaoFactory();
+        factory = new HongBaoTokenFactory();
         tokenA = new MockERC20("TokenA", "TA", 18);
         tokenB = new MockERC20("TokenB", "TB", 18);
     }
@@ -25,7 +25,7 @@ contract HongBaoFactoryTest is Test {
 
         assertEq(factory.pools(address(tokenA), initiator), pool);
 
-        HongBaoPool p = HongBaoPool(pool);
+        HongBaoTokenPool p = HongBaoTokenPool(pool);
         assertEq(p.lockedToken(), address(tokenA));
         assertEq(p.initiator(), initiator);
     }
@@ -37,21 +37,23 @@ contract HongBaoFactoryTest is Test {
     }
 
     function test_createPool_zero_token_reverts() public {
-        vm.expectRevert(IHongBaoFactory.ZeroAddress.selector);
+        vm.expectRevert(IHongBaoTokenFactory.ZeroAddress.selector);
         factory.createPool(address(0), initiator);
     }
 
     function test_createPool_open_pool_ok() public {
         // initiator == 0 is a valid "open" pool.
         address pool = factory.createPool(address(tokenA), address(0));
-        assertEq(HongBaoPool(pool).initiator(), address(0));
+        assertEq(HongBaoTokenPool(pool).initiator(), address(0));
         assertEq(factory.pools(address(tokenA), address(0)), pool);
     }
 
     function test_createPool_duplicate_reverts() public {
         address first = factory.createPool(address(tokenA), initiator);
 
-        vm.expectRevert(abi.encodeWithSelector(IHongBaoFactory.PoolExists.selector, address(tokenA), initiator, first));
+        vm.expectRevert(
+            abi.encodeWithSelector(IHongBaoTokenFactory.PoolExists.selector, address(tokenA), initiator, first)
+        );
         factory.createPool(address(tokenA), initiator);
     }
 

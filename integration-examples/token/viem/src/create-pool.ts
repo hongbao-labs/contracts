@@ -1,8 +1,8 @@
 /**
- * HongBao CreatePool — 通过 HongBaoFactory 部署一个新 pool
+ * HongBao CreatePool — 通过 HongBaoTokenFactory 部署一个新 pool
  *
  * 对应合约调用：
- *   HongBaoFactory.createPool(token, initiator) -> address pool
+ *   HongBaoTokenFactory.createPool(token, initiator) -> address pool
  *
  * 每一对 (token, initiator) 在一个 factory 下只能创建一次；重复调用会 revert。
  * pool 地址由 CREATE2 确定，可用 computePoolAddress 提前算出。
@@ -10,7 +10,7 @@
  * 环境变量:
  *   RPC_URL           — RPC 节点地址
  *   PRIVATE_KEY       — 部署者私钥（付 gas）
- *   FACTORY_ADDRESS   — HongBaoFactory 合约地址
+ *   FACTORY_ADDRESS   — HongBaoTokenFactory 合约地址
  *   TOKEN             — 池锁定的 ERC20 代币地址
  *   INITIATOR         — 可选；传地址表示"仅该地址可存入"，
  *                       省略或传 0x000...0 表示开放池（任何人可存入）
@@ -20,18 +20,10 @@
  *     npx tsx src/create-pool.ts
  */
 
-import {
-  createPublicClient,
-  createWalletClient,
-  http,
-  parseAbi,
-  zeroAddress,
-  type Address,
-  type Hex,
-} from 'viem';
+import { createPublicClient, createWalletClient, http, parseAbi, zeroAddress, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
-const HongBaoFactoryABI = parseAbi([
+const HongBaoTokenFactoryABI = parseAbi([
   'function pools(address token, address initiator) view returns (address)',
   'function createPool(address token, address initiator) returns (address pool)',
   'function computePoolAddress(address token, address initiator) view returns (address)',
@@ -62,7 +54,7 @@ async function main() {
   // 1. 先查 registry，避免白白发一个会 revert 的 tx
   const existing = await publicClient.readContract({
     address: factory,
-    abi: HongBaoFactoryABI,
+    abi: HongBaoTokenFactoryABI,
     functionName: 'pools',
     args: [token, initiator],
   });
@@ -74,7 +66,7 @@ async function main() {
   // 2. 预计算 CREATE2 地址（可用于前端展示 / 监听事件前的预提交）
   const predicted = await publicClient.readContract({
     address: factory,
-    abi: HongBaoFactoryABI,
+    abi: HongBaoTokenFactoryABI,
     functionName: 'computePoolAddress',
     args: [token, initiator],
   });
@@ -90,7 +82,7 @@ async function main() {
   const { request } = await publicClient.simulateContract({
     account,
     address: factory,
-    abi: HongBaoFactoryABI,
+    abi: HongBaoTokenFactoryABI,
     functionName: 'createPool',
     args: [token, initiator],
   });
@@ -105,7 +97,7 @@ async function main() {
   // 4. 从 registry 读出最终地址并核对
   const deployed = await publicClient.readContract({
     address: factory,
-    abi: HongBaoFactoryABI,
+    abi: HongBaoTokenFactoryABI,
     functionName: 'pools',
     args: [token, initiator],
   });

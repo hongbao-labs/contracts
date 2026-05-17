@@ -5,7 +5,7 @@
  *
  * 环境变量:
  *   RPC_URL          — RPC 节点地址
- *   POOL_ADDRESS     — HongBaoPool 合约地址
+ *   POOL_ADDRESS     — HongBaoTokenPool 合约地址
  *   CARD_PRIVATE_KEY — 卡片（unlockAddress）的私钥
  *   TO               — 提款接收地址
  *
@@ -17,16 +17,10 @@
  *     npx tsx src/sign.ts
  */
 
-import {
-  createPublicClient,
-  http,
-  parseAbi,
-  type Address,
-  type Hex,
-} from 'viem';
+import { createPublicClient, http, parseAbi, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 
-const HongBaoPoolABI = parseAbi([
+const HongBaoTokenPoolABI = parseAbi([
   'function getWithdrawDigest(address unlockAddress, address to) view returns (bytes32)',
 ]);
 
@@ -51,7 +45,7 @@ async function main() {
 
   const digest = await client.readContract({
     address: poolAddress,
-    abi: HongBaoPoolABI,
+    abi: HongBaoTokenPoolABI,
     functionName: 'getWithdrawDigest',
     args: [unlockAddress, to],
   });

@@ -2,18 +2,18 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Script.sol";
-import {HongBaoPool} from "../src/HongBao/HongBaoPool.sol";
-import {IERC20} from "../src/HongBao/interfaces/IERC20.sol";
+import {HongBaoTokenPool} from "../src/HongBao/token/HongBaoTokenPool.sol";
+import {IERC20} from "../src/HongBao/shared/interfaces/IERC20.sol";
 
 interface IERC20Metadata {
     function decimals() external view returns (uint8);
 }
 
 /// @title Deposit — 单笔存入脚本
-/// @notice 向 HongBaoPool 存入 ERC20，锁定到指定 unlockAddress（卡片公钥地址）
+/// @notice 向 HongBaoTokenPool 存入 ERC20，锁定到指定 unlockAddress（卡片公钥地址）
 ///
 /// @notice 环境变量:
-///           POOL            — HongBaoPool 合约地址
+///           POOL            — HongBaoTokenPool 合约地址
 ///           UNLOCK_ADDRESS  — 卡片公钥地址（锁定目标）
 ///           AMOUNT          — 锁定数量（整币，按 token.decimals() 换算）
 ///           LOCK_DAYS       — 锁定天数（首次存入必须 >= 30）
@@ -26,7 +26,7 @@ interface IERC20Metadata {
 ///     --broadcast
 contract Deposit is Script {
     function run() external {
-        HongBaoPool pool = HongBaoPool(vm.envAddress("POOL"));
+        HongBaoTokenPool pool = HongBaoTokenPool(vm.envAddress("POOL"));
         address unlockAddress = vm.envAddress("UNLOCK_ADDRESS");
         uint256 amountWhole = vm.envUint("AMOUNT");
         uint256 lockTime = vm.envUint("LOCK_DAYS") * 1 days;
@@ -37,7 +37,7 @@ contract Deposit is Script {
         uint256 amount = amountWhole * (10 ** decimals);
 
         console.log("=========================================");
-        console.log("  HongBaoPool.deposit");
+        console.log("  HongBaoTokenPool.deposit");
         console.log("=========================================");
         console.log("Pool:          ", address(pool));
         console.log("Token:         ", token);

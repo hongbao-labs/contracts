@@ -1,15 +1,7 @@
-import {
-  createPublicClient,
-  http,
-  erc20Abi,
-  parseAbi,
-  formatUnits,
-  type Address,
-  type Hex,
-} from 'viem';
+import { createPublicClient, http, erc20Abi, parseAbi, formatUnits, type Address, type Hex } from 'viem';
 import { mainnet } from 'viem/chains';
 
-const HongBaoPoolABI = parseAbi([
+const HongBaoTokenPoolABI = parseAbi([
   'function lockedToken() view returns (address)',
   'function initiator() view returns (address)',
   'function cardTotal(address unlockAddress) view returns (uint256)',
@@ -39,10 +31,10 @@ const publicClient = createPublicClient({
 export async function getHongbaoStatus(unlockAddress: Address) {
   const [total, expire, unlockedAt, token] = await publicClient.multicall({
     contracts: [
-      { address: POOL_ADDRESS, abi: HongBaoPoolABI, functionName: 'cardTotal', args: [unlockAddress] },
-      { address: POOL_ADDRESS, abi: HongBaoPoolABI, functionName: 'cardExpire', args: [unlockAddress] },
-      { address: POOL_ADDRESS, abi: HongBaoPoolABI, functionName: 'cardUnlockedAt', args: [unlockAddress] },
-      { address: POOL_ADDRESS, abi: HongBaoPoolABI, functionName: 'lockedToken' },
+      { address: POOL_ADDRESS, abi: HongBaoTokenPoolABI, functionName: 'cardTotal', args: [unlockAddress] },
+      { address: POOL_ADDRESS, abi: HongBaoTokenPoolABI, functionName: 'cardExpire', args: [unlockAddress] },
+      { address: POOL_ADDRESS, abi: HongBaoTokenPoolABI, functionName: 'cardUnlockedAt', args: [unlockAddress] },
+      { address: POOL_ADDRESS, abi: HongBaoTokenPoolABI, functionName: 'lockedToken' },
     ],
     allowFailure: false,
   });
@@ -84,7 +76,7 @@ export async function getHongbaoStatus(unlockAddress: Address) {
 export async function getWithdrawDigest(unlockAddress: Address, to: Address) {
   return publicClient.readContract({
     address: POOL_ADDRESS,
-    abi: HongBaoPoolABI,
+    abi: HongBaoTokenPoolABI,
     functionName: 'getWithdrawDigest',
     args: [unlockAddress, to],
   });
@@ -108,7 +100,7 @@ export async function getWithdrawDigest(unlockAddress: Address, to: Address) {
 // ): Promise<Hex> {
 //   return walletClient.writeContract({
 //     address: POOL_ADDRESS,
-//     abi: HongBaoPoolABI,
+//     abi: HongBaoTokenPoolABI,
 //     functionName: 'withdraw',
 //     args: [unlockAddress, to, v, r, s],
 //   });
@@ -120,13 +112,7 @@ export async function getWithdrawDigest(unlockAddress: Address, to: Address) {
  */
 const SPONSOR_API = process.env.SPONSOR_API;
 
-export async function submitWithdrawSponsored(
-  unlockAddress: Address,
-  to: Address,
-  v: number,
-  r: Hex,
-  s: Hex,
-) {
+export async function submitWithdrawSponsored(unlockAddress: Address, to: Address, v: number, r: Hex, s: Hex) {
   if (!SPONSOR_API) throw new Error('SPONSOR_API not configured');
   const res = await fetch(`${SPONSOR_API}/api/withdrawal`, {
     method: 'POST',

@@ -2,14 +2,14 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Script.sol";
-import {HongBaoFactory} from "../src/HongBao/HongBaoFactory.sol";
+import {HongBaoTokenFactory} from "../src/HongBao/token/HongBaoTokenFactory.sol";
 import {MockERC20} from "../test/mocks/MockERC20.sol";
 
-/// @title Deploy — 部署 HongBaoFactory（以及可选的首个 HongBaoPool）
+/// @title Deploy — 部署 HongBaoTokenFactory（以及可选的首个 HongBaoTokenPool）
 ///
 /// @notice 部署流程：
 ///           1. 若未指定 TOKEN，则部署 MockERC20 并给部署者 mint 测试币
-///           2. 部署 HongBaoFactory
+///           2. 部署 HongBaoTokenFactory
 ///           3. 若 CREATE_POOL=true（默认），通过 factory 创建一个
 ///              (token, initiator) pool
 ///
@@ -41,13 +41,13 @@ contract Deploy is Script {
             console.log("Minted 1,000,000 USDC to deployer");
         }
 
-        HongBaoFactory factory = new HongBaoFactory();
-        console.log("HongBaoFactory deployed:", address(factory));
+        HongBaoTokenFactory factory = new HongBaoTokenFactory();
+        console.log("HongBaoTokenFactory deployed:", address(factory));
 
         address pool;
         if (createPool) {
             pool = factory.createPool(token, initiator);
-            console.log("HongBaoPool deployed:", pool);
+            console.log("HongBaoTokenPool deployed:", pool);
         }
 
         vm.stopBroadcast();
@@ -56,9 +56,9 @@ contract Deploy is Script {
         console.log("  Deployment Summary");
         console.log("=========================================");
         console.log("Token:          ", token);
-        console.log("HongBaoFactory: ", address(factory));
+        console.log("HongBaoTokenFactory: ", address(factory));
         if (createPool) {
-            console.log("HongBaoPool:    ", pool);
+            console.log("HongBaoTokenPool:    ", pool);
             console.log("Pool.initiator: ", initiator);
         }
     }

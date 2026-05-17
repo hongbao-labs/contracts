@@ -1,0 +1,20 @@
+{
+  "name": "hongbao-viem-examples",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "example:nft": "npx tsx nft/viem/src/index.ts",
+    "example:token": "npx tsx token/viem/src/index.ts",
+    "format": "prettier --write \"**/viem/src/**/*.ts\"",
+    "format:check": "prettier --check \"**/viem/src/**/*.ts\""
+  },
+  "dependencies": {
+    "viem": "^2"
+  },
+  "devDependencies": {
+    "prettier": "^3",
+    "tsx": "^4",
+    "typescript": "^5"
+  }
+}

@@ -1,161 +1,70 @@
-# HongBao 钱包 App 集成（收红包）
+# HongBao 钱包 App 集成示例
 
-## 概述
+本目录提供 HongBao 红包合约的钱包 App 集成示例与文档。两个变体共享同一套交互模型（**读取卡信息 → 生成 EIP-712 digest → 硬件设备签名 → 提交 withdraw**），仅在底层资产类型上不同。
 
-本文档描述钱包 App 如何集成 `HongBaoPool` 合约，实现"收红包"功能。
+## 目录
 
-核心流程：**读取红包信息 → 生成签名数据 → 硬件设备签名 → 提交 withdraw 交易**。
+| 变体 | 资产 | 合约 | 集成文档 | 示例代码 |
+|------|------|------|----------|----------|
+| Token | ERC20 | `HongBaoTokenPool` | [token/README.md](./token/README.md) | [token/viem](./token/viem/) |
+| NFT   | ERC721 | `HongBaoNFTPool` | [nft/README.md](./nft/README.md) | [nft/viem](./nft/viem/) |
 
-合约无手续费、无特权中继，`withdraw` 由**任何人**提交即可。Gas 代付是可选的应用层服务（不在合约范围内）。
+## 选择哪一个？
 
-## 前置条件
+- 项目方派发的是同质化代币（USDT、自有 ERC20 等）→ **Token**
+- 项目方派发的是单件 NFT（藏品、入场券、白名单凭证等）→ **NFT**
 
-- `HongBaoPool` 合约地址（由项目方通过 `HongBaoFactory` 部署得到）
-- RPC 节点
+两类合约由各自的 Factory（`HongBaoTokenFactory` / `HongBaoNFTFactory`）独立部署，互不依赖。
 
-## 合约 ABI
+## 共同设计
 
-```typescript
-import { parseAbi } from "viem";
+无论 Token 还是 NFT 版本，钱包 App 都按同样的步骤集成：
 
-const HongBaoPoolABI = parseAbi([
-  "function lockedToken() view returns (address)",
-  "function cardTotal(address unlockAddress) view returns (uint256)",
-  "function cardExpire(address unlockAddress) view returns (uint256)",
-  "function cardUnlockedAt(address unlockAddress) view returns (uint256)",
-  "function isLocked(address unlockAddress) view returns (bool)",
-  "function isExpired(address unlockAddress) view returns (bool)",
-  "function remainingLockTime(address unlockAddress) view returns (uint256)",
-  "function getWithdrawDigest(address unlockAddress, address to) view returns (bytes32)",
-  "function withdraw(address unlockAddress, address to, uint8 v, bytes32 r, bytes32 s)",
-]);
-```
+1. 从硬件设备读到 `unlockAddress`（卡片地址）
+2. 调 pool 的 view 函数读取卡片信息（金额或 tokenId、过期时间、是否已领取）
+3. 用户填入收款地址 `to`，调 `getWithdrawDigest(unlockAddress, to)` 拿到 32 字节 digest
+4. 把 digest 送进硬件设备签名，拿到 `(v, r, s)`
+5. 任意 EOA 提交 `withdraw(unlockAddress, to, v, r, s)` —— 合约不限制调用者
 
-## 集成流程
-
-### Step 1: 获取卡片地址
-
-从硬件设备获取 `unlockAddress`（卡片公钥对应的以太坊地址）。该地址是红包在合约中的唯一标识。
-
-### Step 2: 查询红包状态
-
-组合调用几个 view 函数：
-
-```typescript
-const [total, expire, unlockedAt, token] = await Promise.all([
-  publicClient.readContract({ address: POOL, abi: HongBaoPoolABI, functionName: "cardTotal", args: [unlockAddress] }),
-  publicClient.readContract({ address: POOL, abi: HongBaoPoolABI, functionName: "cardExpire", args: [unlockAddress] }),
-  publicClient.readContract({ address: POOL, abi: HongBaoPoolABI, functionName: "cardUnlockedAt", args: [unlockAddress] }),
-  publicClient.readContract({ address: POOL, abi: HongBaoPoolABI, functionName: "lockedToken" }),
-]);
-
-const now = BigInt(Math.floor(Date.now() / 1000));
-const isLocked = total > 0n && unlockedAt === 0n;
-const isExpired = isLocked && now >= expire;
-```
-
-状态判断：
-
-| 条件 | 含义 |
-|------|------|
-| `total === 0 && unlockedAt === 0` | 红包不存在 |
-| `unlockedAt !== 0` | 已被领取 |
-| `total > 0 && unlockedAt === 0 && now < expire` | 可领取 |
-| `total > 0 && unlockedAt === 0 && now >= expire` | 已过期（持卡人仍可用签名领取，直到 depositor 回收为止） |
-
-### Step 3: 获取代币展示信息
-
-从 `lockedToken()` 拿到 ERC20 地址，再读 `symbol()` / `decimals()`：
-
-```typescript
-import { erc20Abi } from "viem";
-
-const [symbolResult, decimalsResult] = await publicClient.multicall({
-  contracts: [
-    { address: token, abi: erc20Abi, functionName: "symbol" },
-    { address: token, abi: erc20Abi, functionName: "decimals" },
-  ],
-});
-```
-
-### Step 4: 生成签名 Digest
-
-用户确认领取并输入收款地址后：
-
-```typescript
-const digest = await publicClient.readContract({
-  address: POOL,
-  abi: HongBaoPoolABI,
-  functionName: "getWithdrawDigest",
-  args: [unlockAddress, recipientAddress],
-});
-```
-
-### Step 5: 硬件设备签名
-
-将 digest（32 字节）发给硬件设备，设备用内置私钥签名后返回 `v`, `r`, `s`。
-
-### Step 6: 提交 withdraw 交易
-
-`withdraw` 合约函数无调用者限制，任何地址都能提交。
-
-#### 方式 A: 应用自有钱包付 gas
-
-```typescript
-const txHash = await walletClient.writeContract({
-  address: POOL,
-  abi: HongBaoPoolABI,
-  functionName: "withdraw",
-  args: [unlockAddress, recipientAddress, v, r, s],
-});
-```
-
-适用于 App 已经管理了一个发送地址，或用户自带 EOA 的情况。
-
-#### 方式 B: 由代付服务提交（可选）
-
-如果产品要做"用户零 ETH 体验"，App 后端或第三方服务接收 `(unlockAddress, to, v, r, s)`，再以自己的钱包发交易。
-
-由于合约不收取任何手续费、没有白名单限制，这一层完全是业务逻辑：后端决定是否对用户收费、如何收费。合约层不关心。
-
-## 完整流程图
+EIP-712 schema 在两个合约中完全一致：
 
 ```
-app 连接钱包
-     │
-     ▼
-获取 unlockAddress（硬件设备）
-     │
-     ▼
-读取 cardTotal / cardExpire / cardUnlockedAt ──→ 展示红包信息
-     │
-     ▼
-  可领取？
-   ├── 否 → 提示"已领取"或"不存在"
-   │
-   └── 是
-       │
-       ▼
-   getWithdrawDigest(unlockAddress, to) ──→ digest
-       │
-       ▼
-   发送 digest 到硬件设备签名 ──→ v, r, s
-       │
-       ▼
-   提交 withdraw(unlockAddress, to, v, r, s)
-   ├── 自有钱包发交易
-   └── 转交给代付服务（可选，纯业务层）
+Withdraw(address unlockAddress, address to)
+Domain: name="HongBao", version="1", chainId, verifyingContract
 ```
 
-## 运行示例代码
+签名脚本、digest 本地打包逻辑可以在两个变体间复用。
 
-| 变量 | 必填 | 说明 |
-|------|------|------|
-| `POOL_ADDRESS` | 是 | HongBaoPool 合约地址 |
-| `RPC_URL` | 是 | RPC 节点地址 |
+## 主要差异
+
+| 方面 | Token | NFT |
+|------|-------|-----|
+| Pool 模式 | 开放 / 限定（initiator 是否为 0） | 仅限定模式 |
+| 一卡多次充值 (topup) | 支持 | 不支持 |
+| 关键卡字段 | `cardTotal` (uint256) | `cardTokenId` (uint256) |
+| 卡是否存在的判定 | `cardTotal != 0 \|\| cardUnlockedAt != 0` | `cardExpire != 0`（tokenId=0 是合法值）|
+| 资产合约入口 | `lockedToken()` | `lockedCollection()` |
+| Withdraw 转账 | `IERC20.transfer` | `IERC721.safeTransferFrom` |
+| 收款地址 `to` 校验 | 无特殊要求 | **必须**能接收 ERC721；签名前要校验 |
+| 展示元数据 | `symbol()` / `decimals()` | `name()` / `symbol()` / `tokenURI()`（均可选）|
+
+NFT 版本最关键的差异：硬件设备每张卡只能签一次。**一旦让设备对错误的 `to` 签了名（例如不能接收 ERC721 的合约），这张卡就报废了**——签名已经用掉，但链上资产无法转出。集成方必须在让设备签名前校验 `to`。详见 [nft/README.md](./nft/README.md) Step 5。
+
+## 跑示例代码
 
 ```bash
-cd integration-examples/viem
+cd integration-examples
 npm install
-npx tsx src/index.ts
+
+npm run example:token   # Token 变体
+npm run example:nft     # NFT 变体
 ```
+
+或直接跑某个脚本：
+
+```bash
+npx tsx nft/viem/src/withdraw-cli.ts
+npx tsx token/viem/src/create-pool.ts
+```
+
+需要的环境变量见各自 README。
