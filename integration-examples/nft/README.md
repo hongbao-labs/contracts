@@ -123,6 +123,13 @@ Domain: name="HongBao", version="1", chainId, verifyingContract
 > - 若允许合约地址，应当 off-chain 先调用 `IERC165.supportsInterface(0x150b7a02)` 或 `IERC721Receiver.onERC721Received` dry-run 验证
 > - UI 提示用户："确认后将不可更改收款地址"
 
+> ⚠️ **项目方（initiator）approval 卫生**：NFT pool 的 push-path (`onERC721Received`) 只校验 `from == initiator`。这个 `from` 是 collection 在调用时填的——按 ERC721 标准，**任何持有 initiator 在该 collection 上 `setApprovalForAll` 授权的地址**，都可以替 initiator 推送 NFT 进 pool，并自由选 `unlockAddress` 和 `lockTime`。如果攻击者控制了那个 `unlockAddress` 对应的设备私钥，就等于变相窃取 initiator 的 NFT。
+>
+> 项目方部署后**必须**：
+> - 只对**本 pool** 做 `setApprovalForAll(pool, true)`
+> - 绝不对未审计的第三方合约 / 未知 operator 授权
+> - 定期审查 collection 上自己账户的 active approvals（`isApprovedForAll(initiator, *)`）
+
 ### Step 6: 提交 withdraw 交易
 
 `withdraw` 合约函数无调用者限制，任何地址都能提交。
