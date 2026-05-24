@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-HongBao 端到端集成测试
+HongBao end-to-end integration test
 
-完整流程：
-  1. 启动 anvil 本地链
-  2. 部署 MockERC20 + HongBaoTokenPool（直接部署 + 通过 HongBaoTokenFactory）
-  3. 连接 STM32 设备，获取卡片以太坊地址
-  4. Initiator 存入代币，锁定到卡片地址
-  5. 从合约获取 withdraw digest
-  6. 设备签名 digest
-  7. 测试 withdraw（全额，任何人可提交）
-  8. 测试 withdrawExpired（过期取回）
-  9. 测试 batchDeposit
- 10. 测试签名不匹配 revert
- 11. 测试 HongBaoTokenFactory.createPool + computePoolAddress
+Full flow:
+  1. Start the anvil local chain
+  2. Deploy MockERC20 + HongBaoTokenPool (direct deployment + via HongBaoTokenFactory)
+  3. Connect the STM32 device and obtain the card's Ethereum address
+  4. Initiator deposits tokens, locked to the card address
+  5. Obtain the withdraw digest from the contract
+  6. Device signs the digest
+  7. Test withdraw (full amount, anyone can submit)
+  8. Test withdrawExpired (expired reclaim)
+  9. Test batchDeposit
+ 10. Test signature-mismatch revert
+ 11. Test HongBaoTokenFactory.createPool + computePoolAddress
 
-依赖: forge, cast, anvil (foundry), stm32_crypto_wrapper
+Dependencies: forge, cast, anvil (foundry), stm32_crypto_wrapper
 """
 
 import os
@@ -33,7 +33,8 @@ MAC_TOOL_DIR = os.path.join(ROOT_DIR, "mac_tool")
 sys.path.insert(0, MAC_TOOL_DIR)
 from stm32_crypto_wrapper import STM32CryptoWrapper, to_checksum_address
 
-# Anvil 默认账户
+# Anvil's built-in public default accounts (derived from the mnemonic "test test test ... junk").
+# These private keys are publicly known and are for local-chain testing only; they hold no real assets —— never send mainnet funds to these addresses.
 DEPLOYER_PK = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 DEPLOYER_ADDR = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 INITIATOR_PK = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
@@ -93,7 +94,7 @@ def cast_send(contract, sig, *args, pk=DEPLOYER_PK):
 
 def _parse_uint(raw: str) -> int:
     raw = raw.strip()
-    # cast 可能返回 "100000000000000000000 [1e20]" 格式，只取首段
+    # cast may return the format "100000000000000000000 [1e20]"; take only the first segment
     num = raw.split()[0] if raw.split() else raw
     return int(num, 16) if num.startswith("0x") else int(num)
 
@@ -126,7 +127,7 @@ def _free_port(port: str):
 
 def start_anvil():
     global anvil_proc
-    print("[Setup] 启动 anvil...")
+    print("[Setup] Starting anvil...")
     _free_port(ANVIL_PORT)
     try:
         anvil_proc = subprocess.Popen(
@@ -138,7 +139,7 @@ def start_anvil():
         )
     except FileNotFoundError:
         raise RuntimeError(
-            "Anvil 未找到。请安装 Foundry (foundry.toolchain) 并确保 anvil 在 PATH 中。"
+            "Anvil not found. Please install Foundry (foundry.toolchain) and ensure anvil is in PATH."
         )
     time.sleep(1.5)
     if anvil_proc.poll() is not None:
@@ -146,7 +147,7 @@ def start_anvil():
             out, err = anvil_proc.communicate(timeout=2)
         except subprocess.TimeoutExpired:
             out, err = "", ""
-        msg = "Anvil 启动失败。"
+        msg = "Anvil failed to start."
         if err and err.strip():
             msg += f" stderr: {err.strip()[:500]}"
         if out and out.strip():
@@ -172,7 +173,7 @@ def deploy(contract_path, *constructor_args) -> str:
     for line in output.split("\n"):
         if "Deployed to:" in line:
             return line.split("Deployed to:")[-1].strip()
-    raise RuntimeError(f"部署失败:\n{output}")
+    raise RuntimeError(f"Deployment failed:\n{output}")
 
 
 def fresh_pool_and_token(initiator=INITIATOR_ADDR):
@@ -244,26 +245,26 @@ def main():
 
     start_anvil()
 
-    print("\n[Device] 连接 STM32...")
+    print("\n[Device] Connecting STM32...")
     crypto = STM32CryptoWrapper()
     crypto.connect()
     card_addr = to_checksum_address(crypto.get_ethereum_address())
-    print(f"  卡片地址: {card_addr}")
+    print(f"  Card address: {card_addr}")
 
     results = []
 
     # ================================================================
-    # Test 1: withdraw — 全额，任何人可提交
+    # Test 1: withdraw — full amount, anyone can submit
     # ================================================================
-    print_header(1, "withdraw — 全额，由 submitter（非 initiator）提交")
+    print_header(1, "withdraw — full amount, submitted by submitter (not the initiator)")
 
     pool, token = fresh_pool_and_token()
     deposit(pool, card_addr, 100)
-    print("  存入 100 TT")
+    print("  Deposited 100 TT")
 
     digest = get_digest(pool, card_addr, RECIPIENT_ADDR)
     sig = crypto.sign_digest_ethereum(digest)
-    print(f"  签名: v={sig['v']}")
+    print(f"  Signature: v={sig['v']}")
 
     bal_before = get_balance(token, RECIPIENT_ADDR)
     cast_send(
@@ -274,52 +275,52 @@ def main():
         str(sig["v"]),
         sig["r"],
         sig["s"],
-        pk=SUBMITTER_PK,  # 注意：非 initiator，也非 "relayer"，就是任意第三方
+        pk=SUBMITTER_PK,  # Note: not the initiator, nor a "relayer"; just an arbitrary third party
     )
     payout = get_balance(token, RECIPIENT_ADDR) - bal_before
 
     ok = payout == 100 * 10**18
-    print(f"  到账: {payout / 10**18} TT → {'PASS' if ok else 'FAIL'}")
+    print(f"  Received: {payout / 10**18} TT → {'PASS' if ok else 'FAIL'}")
     results.append(("withdraw (full amount, submitted by anyone)", ok))
 
     # ================================================================
-    # Test 2: withdrawExpired — 过期取回
+    # Test 2: withdrawExpired — expired reclaim
     # ================================================================
-    print_header(2, "withdrawExpired — 过期后 Initiator 取回")
+    print_header(2, "withdrawExpired — Initiator reclaims after expiry")
 
     pool, token = fresh_pool_and_token()
     bal_init_before = get_balance(token, INITIATOR_ADDR)
     deposit(pool, card_addr, 100, lock_seconds=LOCK_SECONDS)
-    print(f"  存入 100 TT, lockTime={LOCK_SECONDS}s")
+    print(f"  Deposited 100 TT, lockTime={LOCK_SECONDS}s")
 
     run(["cast", "rpc", "evm_increaseTime", str(WARP_SECONDS), "--rpc-url", RPC])
     run(["cast", "rpc", "evm_mine", "--rpc-url", RPC])
-    print(f"  快进 {WARP_SECONDS} 秒")
+    print(f"  Fast-forwarded {WARP_SECONDS} seconds")
 
     cast_send(pool, "withdrawExpired(address)", card_addr, pk=INITIATOR_PK)
     net = get_balance(token, INITIATOR_ADDR) - bal_init_before  # -100 + 100 = 0
 
     ok = net == 0
-    print(f"  initiator 净变化: {net / 10**18} TT → {'PASS' if ok else 'FAIL'}")
+    print(f"  initiator net change: {net / 10**18} TT → {'PASS' if ok else 'FAIL'}")
     results.append(("withdrawExpired (full return)", ok))
 
     # ================================================================
-    # Test 3: batchDeposit — 批量存款，随后用签名提取其中一张
+    # Test 3: batchDeposit — batch deposit, then withdraw one of them with a signature
     # ================================================================
-    print_header(3, "batchDeposit — 3 张卡，随后 withdraw 其中 1 张")
+    print_header(3, "batchDeposit — 3 cards, then withdraw 1 of them")
 
     pool, token = fresh_pool_and_token()
     extra1 = random_address()
     extra2 = random_address()
     cards = [card_addr, extra1, extra2]
     batch_deposit(pool, cards, 100)
-    print(f"  批量存入 3 张卡，每张 100 TT")
+    print(f"  Batch-deposited 3 cards, 100 TT each")
 
     for c in cards:
         total = card_total(pool, c)
         assert total == 100 * 10**18, f"card {c} total mismatch: {total}"
 
-    # 只能对有私钥的 card_addr 执行 withdraw。
+    # withdraw can only be performed for card_addr, for which we hold the private key.
     digest = get_digest(pool, card_addr, RECIPIENT_ADDR)
     sig = crypto.sign_digest_ethereum(digest)
 
@@ -336,7 +337,7 @@ def main():
     )
     payout = get_balance(token, RECIPIENT_ADDR) - bal_before
 
-    # 其它两张卡应原封不动。
+    # The other two cards should remain untouched.
     other_totals_ok = (
         card_total(pool, extra1) == 100 * 10**18
         and card_total(pool, extra2) == 100 * 10**18
@@ -344,19 +345,19 @@ def main():
 
     ok = payout == 100 * 10**18 and other_totals_ok
     print(
-        f"  到账: {payout / 10**18} TT, 其它两张卡未受影响: {other_totals_ok} → {'PASS' if ok else 'FAIL'}"
+        f"  Received: {payout / 10**18} TT, other two cards unaffected: {other_totals_ok} → {'PASS' if ok else 'FAIL'}"
     )
     results.append(("batchDeposit + single withdraw", ok))
 
     # ================================================================
-    # Test 4: Invalid signature — 应 revert
+    # Test 4: Invalid signature — should revert
     # ================================================================
-    print_header(4, "Invalid signature — 应 revert")
+    print_header(4, "Invalid signature — should revert")
 
     pool, token = fresh_pool_and_token()
     deposit(pool, card_addr, 100)
 
-    # 签给 DEPLOYER_ADDR 但提交时传 RECIPIENT_ADDR → digest 对不上
+    # Signed for DEPLOYER_ADDR but submitted with RECIPIENT_ADDR → digest does not match
     wrong_digest = get_digest(pool, card_addr, DEPLOYER_ADDR)
     sig = crypto.sign_digest_ethereum(wrong_digest)
 
@@ -372,14 +373,14 @@ def main():
             pk=SUBMITTER_PK,
         )
         ok = False
-        print("  结果: FAIL (应 revert 但成功了)")
+        print("  Result: FAIL (should have reverted but succeeded)")
     except RuntimeError:
         ok = True
-        print("  结果: PASS (正确 revert)")
+        print("  Result: PASS (correctly reverted)")
     results.append(("invalid signature revert", ok))
 
     # ================================================================
-    # Test 5: HongBaoTokenFactory — 部署、预测地址、实际部署一致
+    # Test 5: HongBaoTokenFactory — deploy, predicted address matches actual deployment
     # ================================================================
     print_header(5, "HongBaoTokenFactory.createPool + computePoolAddress")
 
@@ -412,7 +413,7 @@ def main():
     ok = predicted.lower() == registered.lower() and int(registered, 16) != 0
     print(f"  Predicted: {predicted}")
     print(f"  Deployed:  {registered}")
-    print(f"  结果: {'PASS' if ok else 'FAIL'}")
+    print(f"  Result: {'PASS' if ok else 'FAIL'}")
     results.append(("factory computePoolAddress == createPool", ok))
 
     # ================================================================
@@ -421,7 +422,7 @@ def main():
     crypto.close()
 
     print("\n" + "=" * 60)
-    print("  测试结果汇总")
+    print("  Test results summary")
     print("=" * 60)
     all_pass = True
     for name, ok in results:

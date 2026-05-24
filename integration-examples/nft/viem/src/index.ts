@@ -109,14 +109,14 @@ export async function getWithdrawDigest(unlockAddress: Address, to: Address) {
 
 // ============ Write: submit withdraw ============
 //
-// `withdraw` 无调用者限制，任何 EOA 都能提交。以下展示两种常见路径。
+// `withdraw` has no caller restriction; any EOA can submit it. Two common paths are shown below.
 //
-// ⚠️ NFT 版本需要提前校验 `to` 能接收 ERC721 (safeTransferFrom 兼容)。
-//    硬件设备每张卡只能签一次，签错了 to 这张卡就报废了。
+// ⚠️ The NFT version requires checking up front that `to` can receive ERC721 (safeTransferFrom compatible).
+//    The hardware device can sign each card only once; if you sign the wrong `to`, the card is bricked.
 
 /**
- * Path A — 用 App 侧钱包直接上链。
- * 使用处需传入一个 viem walletClient。
+ * Path A — submit on-chain directly with the App-side wallet.
+ * The caller must pass in a viem walletClient.
  */
 // export async function submitWithdrawOnchain(
 //   walletClient: WalletClient,
@@ -135,8 +135,8 @@ export async function getWithdrawDigest(unlockAddress: Address, to: Address) {
 // }
 
 /**
- * Path B — 交给 App 后端的代付服务。
- * 合约层面不区分，这一层纯业务。
+ * Path B — hand off to the App backend's sponsor service.
+ * The contract makes no distinction here; this layer is pure business logic.
  */
 const SPONSOR_API = process.env.SPONSOR_API;
 
@@ -164,7 +164,7 @@ async function main() {
   const unlockAddress: Address = '0x0000000000000000000000000000000000000001'; // TODO: replace
   const recipient: Address = '0x0000000000000000000000000000000000000002'; // TODO: replace
 
-  // 1. 查询红包状态
+  // 1. Query the red packet status
   const status = await getHongbaoStatus(unlockAddress);
 
   if (!status.exists) {
@@ -182,17 +182,17 @@ async function main() {
   console.log(`Token URI:    ${status.tokenURI ?? '-'}`);
   console.log(`Expired:      ${status.isExpired}`);
 
-  // 2. ⚠️ 让设备签名前必须先校验 `to` 能接收 ERC721。
-  //    若是合约地址，建议 off-chain 用 IERC165.supportsInterface(0x150b7a02) 验证。
+  // 2. ⚠️ Before asking the device to sign, you must verify that `to` can receive ERC721.
+  //    If it is a contract address, verify off-chain with IERC165.supportsInterface(0x150b7a02).
 
-  // 3. 获取 digest 给硬件签名
+  // 3. Get the digest for the hardware to sign
   const digest = await getWithdrawDigest(unlockAddress, recipient);
   console.log(`Digest to sign: ${digest}`);
 
-  // 4. 发送 digest 到硬件设备，拿到 v, r, s
+  // 4. Send the digest to the hardware device and get back v, r, s
   // const { v, r, s } = await hardwareSign(digest);
 
-  // 5. 提交 withdraw（Path A 自付 / Path B 代付）
+  // 5. Submit withdraw (Path A self-paid / Path B sponsored)
   // const txHash = await submitWithdrawOnchain(walletClient, unlockAddress, recipient, v, r, s);
   // or:
   // await submitWithdrawSponsored(unlockAddress, recipient, v, r, s);

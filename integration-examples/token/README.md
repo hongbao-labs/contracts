@@ -1,25 +1,25 @@
-# HongBao Token (ERC20) 钱包 App 集成（收红包）
+# HongBao Token (ERC20) Wallet App Integration (Receiving a Red Packet)
 
-## 概述
+## Overview
 
-本文档描述钱包 App 如何集成 `HongBaoTokenPool` 合约，实现 ERC20 "收红包"功能。
+This document describes how a wallet app integrates the `HongBaoTokenPool` contract to implement the ERC20 "receiving a red packet" feature.
 
-合约支持两种卡类型：
+The contract supports two card types:
 
-- **普通卡 (Plain card)** —— 一次签名领全额。`cardTaskCount(unlockAddress) == 0`。
-- **任务卡 (Task card)** —— 一次签名只绑定收款地址 + 释放 `basicAmount`，后续每完成一个任务由项目方发布 preimage，任何人提交 `claimTask` 把任务奖励强转给已绑定的 to。`cardTaskCount(unlockAddress) > 0`。
+- **Plain card** — claim the full amount with a single signature. `cardTaskCount(unlockAddress) == 0`.
+- **Task card** — a single signature only binds the recipient address and releases `basicAmount`; thereafter, each time a task is completed the project publishes a preimage, and anyone can submit `claimTask` to force-transfer the task reward to the already-bound `to`. `cardTaskCount(unlockAddress) > 0`.
 
-普通卡核心流程：**读取卡信息 → 生成签名数据 → 硬件设备签名 → 提交 withdraw**。
-任务卡在普通卡流程之后多一段："收齐 preimage → 提交 claimTask"。
+Plain card core flow: **read card info → generate signing data → sign with hardware device → submit withdraw**.
+The task card adds one more segment after the plain card flow: "collect all preimages → submit claimTask".
 
-合约无手续费、无特权中继，`withdraw` / `claimTask` 由**任何人**提交即可。Gas 代付是可选的应用层服务（不在合约范围内）。
+The contract has no fees and no privileged relayer; `withdraw` / `claimTask` can be submitted by **anyone**. Gas sponsorship is an optional application-layer service (out of scope for the contract).
 
-## 前置条件
+## Prerequisites
 
-- `HongBaoTokenPool` 合约地址（由项目方通过 `HongBaoTokenFactory` 部署得到）
-- RPC 节点
+- The `HongBaoTokenPool` contract address (deployed by the project via `HongBaoTokenFactory`)
+- An RPC node
 
-## 合约 ABI
+## Contract ABI
 
 ```typescript
 import { parseAbi } from "viem";
@@ -51,15 +51,15 @@ const HongBaoTokenPoolABI = parseAbi([
 ]);
 ```
 
-## 集成流程
+## Integration Flow
 
-### Step 1: 获取卡片地址
+### Step 1: Get the Card Address
 
-从硬件设备获取 `unlockAddress`（卡片公钥对应的以太坊地址）。该地址是红包在合约中的唯一标识。
+Get the `unlockAddress` (the Ethereum address corresponding to the card's public key) from the hardware device. This address is the unique identifier of the red packet within the contract.
 
-### Step 2: 查询红包状态
+### Step 2: Query the Red Packet Status
 
-组合调用几个 view 函数：
+Make a combined call to several view functions:
 
 ```typescript
 const [total, expire, unlockedAt, token] = await Promise.all([
@@ -74,18 +74,18 @@ const isLocked = total > 0n && unlockedAt === 0n;
 const isExpired = isLocked && now >= expire;
 ```
 
-状态判断：
+Status determination:
 
-| 条件 | 含义 |
+| Condition | Meaning |
 |------|------|
-| `total === 0 && unlockedAt === 0` | 红包不存在 |
-| `unlockedAt !== 0` | 已被领取 |
-| `total > 0 && unlockedAt === 0 && now < expire` | 可领取 |
-| `total > 0 && unlockedAt === 0 && now >= expire` | 已过期（持卡人仍可用签名领取，直到 depositor 回收为止） |
+| `total === 0 && unlockedAt === 0` | The red packet does not exist |
+| `unlockedAt !== 0` | Already claimed |
+| `total > 0 && unlockedAt === 0 && now < expire` | Claimable |
+| `total > 0 && unlockedAt === 0 && now >= expire` | Expired (the card holder can still claim with a signature until the depositor reclaims it) |
 
-### Step 3: 获取代币展示信息
+### Step 3: Get the Token Display Info
 
-从 `lockedToken()` 拿到 ERC20 地址，再读 `symbol()` / `decimals()`：
+Get the ERC20 address from `lockedToken()`, then read `symbol()` / `decimals()`:
 
 ```typescript
 import { erc20Abi } from "viem";
@@ -98,9 +98,9 @@ const [symbolResult, decimalsResult] = await publicClient.multicall({
 });
 ```
 
-### Step 4: 生成签名 Digest
+### Step 4: Generate the Signing Digest
 
-用户确认领取并输入收款地址后：
+After the user confirms the claim and enters the recipient address:
 
 ```typescript
 const digest = await publicClient.readContract({
@@ -111,15 +111,15 @@ const digest = await publicClient.readContract({
 });
 ```
 
-### Step 5: 硬件设备签名
+### Step 5: Sign with the Hardware Device
 
-将 digest（32 字节）发给硬件设备，设备用内置私钥签名后返回 `v`, `r`, `s`。
+Send the digest (32 bytes) to the hardware device; the device signs it with its built-in private key and returns `v`, `r`, `s`.
 
-### Step 6: 提交 withdraw 交易
+### Step 6: Submit the withdraw Transaction
 
-`withdraw` 合约函数无调用者限制，任何地址都能提交。
+The `withdraw` contract function has no caller restriction; any address can submit it.
 
-#### 方式 A: 应用自有钱包付 gas
+#### Option A: The Application's Own Wallet Pays Gas
 
 ```typescript
 const txHash = await walletClient.writeContract({
@@ -130,17 +130,17 @@ const txHash = await walletClient.writeContract({
 });
 ```
 
-适用于 App 已经管理了一个发送地址，或用户自带 EOA 的情况。
+This fits cases where the app already manages a sending address, or the user brings their own EOA.
 
-#### 方式 B: 由代付服务提交（可选）
+#### Option B: Submitted by a Sponsor Service (Optional)
 
-如果产品要做"用户零 ETH 体验"，App 后端或第三方服务接收 `(unlockAddress, to, v, r, s)`，再以自己的钱包发交易。
+If the product wants to offer a "zero-ETH user experience," the app backend or a third-party service receives `(unlockAddress, to, v, r, s)` and then sends the transaction from its own wallet.
 
-由于合约不收取任何手续费、没有白名单限制，这一层完全是业务逻辑：后端决定是否对用户收费、如何收费。合约层不关心。
+Because the contract charges no fees and has no whitelist restriction, this layer is entirely business logic: the backend decides whether and how to charge the user. The contract layer does not care.
 
-#### 方式 C: relayer 批量提交（可选）
+#### Option C: Relayer Batch Submission (Optional)
 
-后端代付服务积攒一段时间的 withdraw 请求，一次性 `batchWithdraw` 上链，摊薄 tx 费：
+The backend sponsor service accumulates withdraw requests over a period of time and submits them on-chain in one `batchWithdraw` to amortize the tx fee:
 
 ```typescript
 await walletClient.writeContract({
@@ -151,24 +151,24 @@ await walletClient.writeContract({
 });
 ```
 
-合约对每个条目**静默跳过失败**（坏签名 / 卡已兑付 / 卡已 close / `to == 0`），不会因为某条过期而毁掉整批。Relayer 应当通过 `Withdrawn` 事件判定哪些条目成功，只对成功的用户结算。`batchClaimTask` 同理（见任务卡章节）。
+The contract **silently skips failures** for each entry (bad signature / card already redeemed / card already closed / `to == 0`), so it won't ruin the entire batch just because one entry is expired. The relayer should determine which entries succeeded via the `Withdrawn` event and settle only with successful users. `batchClaimTask` works the same way (see the Task Card section).
 
-> ⚠️ **代币兼容性**：`batch*` 内部的 ERC20 `transfer` 没有 `try/catch`。如果 `lockedToken` 带 recipient-side callback（ERC777 `tokensReceived`、ERC1363 `onTransferReceived` 等），且某条目的 `to`（或任务卡的 `boundTo`）是一个会在回调里 revert 的合约，**整批会被这一条 DoS**。标准 ERC20（USDC、DAI、纯 ERC20）没有这种回调，不受影响。如果你打算上 ERC777 类代币，relayer 提交前应在 off-chain 过滤 `to` 是否为已知问题合约。
+> ⚠️ **Token compatibility**: The ERC20 `transfer` inside `batch*` has no `try/catch`. If `lockedToken` has a recipient-side callback (ERC777 `tokensReceived`, ERC1363 `onTransferReceived`, etc.) and an entry's `to` (or a task card's `boundTo`) is a contract that reverts in the callback, **the entire batch is DoS'd by that one entry**. Standard ERC20s (USDC, DAI, plain ERC20) have no such callback and are unaffected. If you intend to support ERC777-class tokens, the relayer should filter off-chain whether `to` is a known problematic contract before submitting.
 
-## 任务卡 (Task Card)
+## Task Card
 
-任务卡用于"完成任务才能领取额外奖励"场景。项目方在锁卡时为每张卡承诺 1..255 个任务，每个任务对应一个 `(hash, amount)`：
+The task card is for "complete a task to claim an extra reward" scenarios. When locking each card, the project commits to 1..255 tasks, each corresponding to a `(hash, amount)`:
 
-- `hash = keccak256(abi.encode(chainid, pool, unlockAddress, taskIdx, preimage))` —— preimage 由项目方链下生成保管
-- `amount` —— 完成该任务后释放的金额
-- `basicAmount` —— 签名 withdraw 时立即释放的"开卡奖励"（可以为 0，纯绑定）
+- `hash = keccak256(abi.encode(chainid, pool, unlockAddress, taskIdx, preimage))` — the preimage is generated and kept off-chain by the project
+- `amount` — the amount released after completing that task
+- `basicAmount` — the "card-opening reward" released immediately upon signed withdraw (can be 0, i.e. pure binding)
 
-设计目的：**把签名从"一次性领钱凭证"变成"绑定收款地址的凭证"**。
-- 用户签名 `Withdraw(unlockAddress, to)` 后：合约转 `basicAmount` 给 `to`，并把 `to` 记进 `boundTo`。卡仍 active。
-- 后续每完成一个任务，项目方发 preimage 给用户。**任何人**（用户自己 / relayer / 第三方）都可以提交 `claimTask(unlockAddress, taskIdx, preimage)`，合约校验 hash 后**强制**把该任务的金额转给 `boundTo`。即使 preimage 泄露给第三方也没关系 —— 资金只能去 `boundTo`。
-- 防 preimage 跨链 / 跨卡复用：hash 绑定 `(chainid, pool, unlockAddress, taskIdx)`，同一段 preimage 在别的链 / 池 / 卡 / 槽位上算出的 hash 不同。
+Design goal: **turn the signature from a "one-time proof to claim money" into a "proof that binds a recipient address."**
+- After the user signs `Withdraw(unlockAddress, to)`: the contract transfers `basicAmount` to `to` and records `to` into `boundTo`. The card remains active.
+- Thereafter, each time a task is completed, the project sends the preimage to the user. **Anyone** (the user themselves / a relayer / a third party) can submit `claimTask(unlockAddress, taskIdx, preimage)`; after verifying the hash, the contract **forces** the task amount to be transferred to `boundTo`. It does not matter if the preimage leaks to a third party — the funds can only go to `boundTo`.
+- Preventing cross-chain / cross-card preimage reuse: the hash binds `(chainid, pool, unlockAddress, taskIdx)`, so the same preimage produces a different hash on another chain / pool / card / slot.
 
-### Step 1: 识别卡类型
+### Step 1: Identify the Card Type
 
 ```typescript
 const taskCount = await publicClient.readContract({
@@ -179,13 +179,13 @@ const taskCount = await publicClient.readContract({
 });
 
 if (taskCount === 0) {
-  // 普通卡 —— 走上面 Step 1-6
+  // plain card — follow Step 1-6 above
 } else {
-  // 任务卡 —— 走下面的扩展流程
+  // task card — follow the extended flow below
 }
 ```
 
-### Step 2: 读取任务卡状态
+### Step 2: Read the Task Card State
 
 ```typescript
 const [basicAmount, boundTo, closed, total, unlockedAt] = await Promise.all([
@@ -209,41 +209,41 @@ const tasks = await Promise.all(
 // each: [hash, amount, claimedAt]
 ```
 
-状态判断：
+Status determination:
 
-| 条件 | 含义 |
+| Condition | Meaning |
 |------|------|
-| `closed === true` | 项目方已回收，卡已死，所有 claim/withdraw 都会 revert |
-| `unlockedAt === 0` | 还没签名绑定收款地址。先走 withdraw 流程绑定 |
-| `unlockedAt !== 0 && boundTo !== 0` | 已绑定。`tasks[i].claimedAt === 0` 的槽位可领 |
+| `closed === true` | The project has reclaimed it; the card is dead, and all claim/withdraw calls will revert |
+| `unlockedAt === 0` | Not yet signed/bound to a recipient address. Run the withdraw flow first to bind it |
+| `unlockedAt !== 0 && boundTo !== 0` | Already bound. Slots where `tasks[i].claimedAt === 0` are claimable |
 
-### Step 3: 绑定收款地址（withdraw）
+### Step 3: Bind the Recipient Address (withdraw)
 
-完全复用普通卡的 Step 4-6：
+Fully reuse the plain card's Step 4-6:
 
 ```typescript
 const digest = await pool.getWithdrawDigest(unlockAddress, recipientAddress);
-const { v, r, s } = await hardwareSign(digest);   // 设备签名
+const { v, r, s } = await hardwareSign(digest);   // device signature
 await pool.withdraw(unlockAddress, recipientAddress, v, r, s);
 ```
 
-任务卡的 `withdraw`：
-- 转 `basicAmount` 给 `to`（可能为 0）
-- 把 `to` 写入 `boundTo`（不可改）
-- 设 `unlockedAt = now`
-- **卡仍 active**，可继续 claim 任务
+The task card's `withdraw`:
+- Transfers `basicAmount` to `to` (may be 0)
+- Writes `to` into `boundTo` (immutable)
+- Sets `unlockedAt = now`
+- **The card remains active** and can continue to claim tasks
 
-> ⚠️ 一旦 withdraw 成功，`boundTo` 永久锁定。后续所有 claim 都只能转到这个地址。
+> ⚠️ Once withdraw succeeds, `boundTo` is permanently locked. All subsequent claims can only go to this address.
 
-### Step 4: 提交任务领奖
+### Step 4: Submit Task Claims
 
-项目方在后台验证用户完成任务后，把对应槽位的 `preimage`（字节串）发给用户。**任何人**都可以提交：
+After the project verifies in its backend that the user has completed a task, it sends the corresponding slot's `preimage` (a byte string) to the user. **Anyone** can submit:
 
 ```typescript
-// preimage 是 bytes，viem 用 Hex 字符串表示
+// preimage is bytes; viem represents it as a Hex string
 const preimage: Hex = "0x...";
 
-// （可选）本地预验：算 hash 跟链上对比，避免提交一定会失败的 tx
+// (optional) local pre-check: compute the hash and compare with on-chain to avoid submitting a tx that will surely fail
 const computed = await publicClient.readContract({
   address: POOL,
   abi: HongBaoTokenPoolABI,
@@ -262,14 +262,14 @@ const txHash = await walletClient.writeContract({
 });
 ```
 
-合约保证：
-- `boundTo` 还没绑定 → revert（必须先 withdraw）
-- 卡已 closed → revert
-- hash 不匹配 → revert
-- 该槽位已领过 → revert
-- 否则 → 转 `tasks[taskIdx].amount` 到 `boundTo`，标记 `claimedAt = now`
+Contract guarantees:
+- `boundTo` not yet bound → revert (must withdraw first)
+- Card already closed → revert
+- Hash mismatch → revert
+- Slot already claimed → revert
+- Otherwise → transfer `tasks[taskIdx].amount` to `boundTo` and mark `claimedAt = now`
 
-#### 批量 claim（relayer 用）
+#### Batch Claim (For Relayers)
 
 ```typescript
 await walletClient.writeContract({
@@ -280,17 +280,17 @@ await walletClient.writeContract({
 });
 ```
 
-合约对每个条目静默跳过失败（非任务卡 / 越界 / 已 closed / basic 未完成 / 已 claim / preimage 错），单次失败不毁掉整批。Relayer 通过 `TaskClaimed` 事件判定成功条目。
+The contract silently skips failures for each entry (not a task card / out of bounds / already closed / basic not completed / already claimed / wrong preimage); a single failure does not ruin the entire batch. The relayer determines the successful entries via the `TaskClaimed` event.
 
-### 项目方端（生成 preimage / 锁卡）
+### Project Side (Generating Preimages / Locking Cards)
 
-项目方链下：
-1. 为每张卡随机生成 N 个 preimage（推荐 32 字节 random）
-2. 计算 hash = `keccak256(abi.encode(pool, unlockAddress, taskIdx, preimage))`
-3. 调 `depositWithTasks(unlockAddress, basicAmount, hashes[], amounts[], lockTime)`，或批量 `batchDepositWithTasks(...)`
-4. preimage 链下保管，按完成情况下发
+Off-chain, the project:
+1. Randomly generates N preimages for each card (32-byte random recommended)
+2. Computes hash = `keccak256(abi.encode(pool, unlockAddress, taskIdx, preimage))`
+3. Calls `depositWithTasks(unlockAddress, basicAmount, hashes[], amounts[], lockTime)`, or batches `batchDepositWithTasks(...)`
+4. Keeps the preimages off-chain and releases them as tasks are completed
 
-合约层 hash 算法的 viem 实现：
+A viem implementation of the contract-layer hash algorithm:
 
 ```typescript
 import { encodeAbiParameters, keccak256 } from "viem";
@@ -311,55 +311,55 @@ function commitHash(
 }
 ```
 
-> 项目方一旦 `depositWithTasks`，task 数量、hashes、amounts **永久不可改**。`basicAmount` 可继续通过 `deposit(unlockAddress, amount, 0)` 续充（直到用户完成 withdraw 绑定）。
+> Once the project calls `depositWithTasks`, the task count, hashes, and amounts are **permanently immutable**. `basicAmount` can continue to be topped up via `deposit(unlockAddress, amount, 0)` (until the user completes the withdraw binding).
 
-## 完整流程图
+## Full Flow Diagram
 
 ```
-app 连接钱包
+app connects wallet
      │
      ▼
-获取 unlockAddress（硬件设备）
+get unlockAddress (hardware device)
      │
      ▼
-读取 cardTaskCount(unlockAddress)
+read cardTaskCount(unlockAddress)
      │
-     ├── 0  (普通卡)
+     ├── 0  (plain card)
      │     │
      │     ▼
-     │   读取 cardTotal / cardExpire / cardUnlockedAt
+     │   read cardTotal / cardExpire / cardUnlockedAt
      │     │
      │     ▼
-     │   getWithdrawDigest → 设备签名 → withdraw(unlockAddress, to, v, r, s)
-     │   卡片消费，全额到账
+     │   getWithdrawDigest → device signature → withdraw(unlockAddress, to, v, r, s)
+     │   card consumed, full amount received
      │
-     └── >0 (任务卡)
+     └── >0 (task card)
            │
            ▼
-         读取 cardBasicAmount / cardBoundTo / cardClosed
+         read cardBasicAmount / cardBoundTo / cardClosed
          + task(idx) ×N
            │
            ▼
-         未绑定？(unlockedAt == 0)
-           │   ├── 是 → withdraw 绑定 to + 收 basicAmount
-           │   │       (此时签名权用尽，boundTo 永久锁定)
+         not bound? (unlockedAt == 0)
+           │   ├── yes → withdraw to bind to + receive basicAmount
+           │   │       (the signing right is now used up, boundTo permanently locked)
            │   │
-           │   └── 否 → 跳到 claim 阶段
+           │   └── no → skip to the claim stage
            │
            ▼
-         项目方下发 preimage_i（用户完成任务后）
+         project releases preimage_i (after the user completes the task)
            │
            ▼
          claimTask(unlockAddress, i, preimage_i)
-         金额强转 boundTo，可由任何人（用户/relayer）提交
+         amount force-transferred to boundTo, can be submitted by anyone (user/relayer)
 ```
 
-## 运行示例代码
+## Running the Example
 
-| 变量 | 必填 | 说明 |
+| Variable | Required | Description |
 |------|------|------|
-| `POOL_ADDRESS` | 是 | HongBaoTokenPool 合约地址 |
-| `RPC_URL` | 是 | RPC 节点地址 |
+| `POOL_ADDRESS` | Yes | HongBaoTokenPool contract address |
+| `RPC_URL` | Yes | RPC node URL |
 
 ```bash
 cd integration-examples

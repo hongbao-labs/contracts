@@ -1,27 +1,28 @@
 /**
  * HongBao Task Claim CLI
  *
- * 场景：任务卡已经走过 basic withdraw（`boundTo` 已绑定）；现在某个任务完成了，
- *      项目方发了 preimage 给用户，需要提交 `claimTask` 把任务奖励转给 boundTo。
+ * Scenario: a task card has already gone through the basic withdraw (`boundTo` is bound); now a task has
+ *           been completed, the project has sent the preimage to the user, and `claimTask` needs to be
+ *           submitted to transfer the task reward to boundTo.
  *
- * 跟 withdraw-cli.ts 的差异：
- *   - 不需要硬件签名（claim 用 preimage 校验，不用 ECDSA）
- *   - **任何人**都可以提交 —— 相关用户、relayer、第三方都行
- *   - 资金强制转 `boundTo`，提交者拿不到钱
+ * Differences from withdraw-cli.ts:
+ *   - no hardware signature needed (claim verifies via preimage, not ECDSA)
+ *   - **anyone** can submit it — the relevant user, a relayer, or a third party all work
+ *   - funds are forcibly transferred to `boundTo`; the submitter does not receive the money
  *
- * 流程：
- *   1. 列出所有 claimable 槽位（unclaimed && already-bound）
- *   2. 用户选一个槽位
- *   3. 输入项目方下发的 preimage（hex / 任意 bytes 字符串）
- *   4. 本地算 hash 与链上 commit 对比 → 提交 claimTask
+ * Flow:
+ *   1. List all claimable slots (unclaimed && already-bound)
+ *   2. The user selects a slot
+ *   3. Enter the preimage issued by the project (hex / any bytes string)
+ *   4. Compute the hash locally and compare it with the on-chain commit → submit claimTask
  *
- * 环境变量:
- *   RPC_URL                — RPC 节点
- *   POOL_ADDRESS           — HongBaoTokenPool 地址
- *   UNLOCK_ADDRESS         — 卡片地址
- *   SUBMITTER_PRIVATE_KEY  — 用于发交易的 EOA 私钥（任何人都行）
+ * Environment variables:
+ *   RPC_URL                — RPC node
+ *   POOL_ADDRESS           — HongBaoTokenPool address
+ *   UNLOCK_ADDRESS         — card address
+ *   SUBMITTER_PRIVATE_KEY  — private key of the EOA used to send the transaction (anyone works)
  *
- * 用法:
+ * Usage:
  *   RPC_URL=... POOL_ADDRESS=0x... UNLOCK_ADDRESS=0x... SUBMITTER_PRIVATE_KEY=0x... \
  *     npx tsx src/task-claim-cli.ts
  */

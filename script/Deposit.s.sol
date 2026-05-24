@@ -9,16 +9,16 @@ interface IERC20Metadata {
     function decimals() external view returns (uint8);
 }
 
-/// @title Deposit — 单笔存入脚本
-/// @notice 向 HongBaoTokenPool 存入 ERC20，锁定到指定 unlockAddress（卡片公钥地址）
+/// @title Deposit — Single-deposit script
+/// @notice Deposits ERC20 into a HongBaoTokenPool, locked to a given unlockAddress (the card's public-key address)
 ///
-/// @notice 环境变量:
-///           POOL            — HongBaoTokenPool 合约地址
-///           UNLOCK_ADDRESS  — 卡片公钥地址（锁定目标）
-///           AMOUNT          — 锁定数量（整币，按 token.decimals() 换算）
-///           LOCK_DAYS       — 锁定天数（首次存入必须 >= 30）
+/// @notice Environment variables:
+///           POOL            — HongBaoTokenPool contract address
+///           UNLOCK_ADDRESS  — The card's public-key address (lock target)
+///           AMOUNT          — Lock amount (whole tokens, scaled by token.decimals())
+///           LOCK_DAYS       — Lock duration in days (the first deposit must be >= 30)
 ///
-/// @notice 用法:
+/// @notice Usage:
 ///   POOL=0x... UNLOCK_ADDRESS=0x... AMOUNT=100 LOCK_DAYS=30 \
 ///   forge script script/Deposit.s.sol \
 ///     --rpc-url $RPC_URL \

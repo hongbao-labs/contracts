@@ -1,19 +1,19 @@
 /**
- * HongBao NFT 签名脚本 — 用私钥对 withdraw digest 进行 EIP-712 签名
+ * HongBao NFT signing script — sign the withdraw digest with a private key using EIP-712
  *
- * 仅用于测试：真实场景下 unlockAddress 对应的私钥存在硬件设备里。
+ * For testing only: in a real scenario the private key for unlockAddress lives inside the hardware device.
  *
- * EIP-712 schema 与 ERC20 版本完全相同：
+ * The EIP-712 schema is identical to the ERC20 version:
  *   Withdraw(address unlockAddress, address to)
- * 因此该脚本与 token 版仅有 ABI 名称不同，签名流程一致。
+ * So this script differs from the token version only in ABI names; the signing flow is the same.
  *
- * 环境变量:
- *   RPC_URL          — RPC 节点地址
- *   POOL_ADDRESS     — HongBaoNFTPool 合约地址
- *   CARD_PRIVATE_KEY — 卡片（unlockAddress）的私钥
- *   TO               — 提款接收地址（必须能接收 ERC721）
+ * Environment variables:
+ *   RPC_URL          — RPC node address
+ *   POOL_ADDRESS     — HongBaoNFTPool contract address
+ *   CARD_PRIVATE_KEY — private key of the card (unlockAddress)
+ *   TO               — withdraw recipient address (must be able to receive ERC721)
  *
- * 用法:
+ * Usage:
  *   RPC_URL=http://127.0.0.1:8545 \
  *   POOL_ADDRESS=0x... \
  *   CARD_PRIVATE_KEY=0x... \

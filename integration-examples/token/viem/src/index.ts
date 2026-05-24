@@ -183,11 +183,11 @@ export async function verifyPreimage(unlockAddress: Address, taskIdx: number, pr
 
 // ============ Write: submit withdraw ============
 //
-// `withdraw` 无调用者限制，任何 EOA 都能提交。以下展示两种常见路径。
+// `withdraw` has no caller restriction; any EOA can submit it. Two common paths are shown below.
 
 /**
- * Path A — 用 App 侧钱包直接上链。
- * 使用处需传入一个 viem walletClient。
+ * Path A — submit on-chain directly with the App-side wallet.
+ * The caller must pass in a viem walletClient.
  */
 // export async function submitWithdrawOnchain(
 //   walletClient: WalletClient,
@@ -206,8 +206,8 @@ export async function verifyPreimage(unlockAddress: Address, taskIdx: number, pr
 // }
 
 /**
- * Path B — 交给 App 后端的代付服务。
- * 合约层面不区分，这一层纯业务。
+ * Path B — hand off to the App backend's sponsor service.
+ * The contract makes no distinction here; this layer is pure business logic.
  */
 const SPONSOR_API = process.env.SPONSOR_API;
 
@@ -235,7 +235,7 @@ async function main() {
   const unlockAddress: Address = '0x0000000000000000000000000000000000000001'; // TODO: replace
   const recipient: Address = '0x0000000000000000000000000000000000000002'; // TODO: replace
 
-  // 1. 查询红包状态
+  // 1. Query the red packet status
   const status = await getHongbaoStatus(unlockAddress);
 
   if (!status.isLocked) {
@@ -245,7 +245,7 @@ async function main() {
 
   if (status.kind === 'plain') {
     console.log(`Plain card: ${status.displayAmount} ${status.tokenSymbol}, expired=${status.isExpired}`);
-    // 2. 获取 digest 给硬件签名 → 提交 withdraw
+    // 2. Get the digest for the hardware to sign → submit withdraw
     const digest = await getWithdrawDigest(unlockAddress, recipient);
     console.log(`Digest to sign: ${digest}`);
     // const { v, r, s } = await hardwareSign(digest);

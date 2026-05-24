@@ -1,18 +1,21 @@
 /**
  * HongBao Withdraw CLI
  *
- * 场景：用户手里有硬件卡，已在 App 内查过链上状态；现在想把钱取到某个 `to` 地址。
+ * Scenario: the user holds a hardware card and has already checked its on-chain status in the App;
+ *           now they want to withdraw the funds to some `to` address.
  *
- * 硬件设备只接受 32 字节 digest。为避免"取款时再调一次 getWithdrawDigest"，
- * 我们让服务器在第一次查询卡信息时就把 EIP-712 所需的常量一并下发：
+ * The hardware device only accepts a 32-byte digest. To avoid "calling getWithdrawDigest again at
+ * withdraw time", we have the server deliver the constants needed for EIP-712 together with the first
+ * card-info query:
  *
- *   - DOMAIN_SEPARATOR   （每个 pool 一个，pool 部署时 immutable 固化）
- *   - WITHDRAW_TYPEHASH  （合约常量）
+ *   - DOMAIN_SEPARATOR   (one per pool, fixed as immutable when the pool is deployed)
+ *   - WITHDRAW_TYPEHASH  (a contract constant)
  *
- * 客户端本地打包 digest；再把 digest 发回服务器做交叉校验（服务器调 pool.getWithdrawDigest
- * 比对），防止本地打包被污染。校验通过后再送进硬件设备签名。
+ * The client packs the digest locally; it then sends the digest back to the server for a cross-check
+ * (the server calls pool.getWithdrawDigest and compares), to prevent the local packing from being
+ * tampered with. Only after the check passes is it sent into the hardware device for signing.
  *
- * 运行：
+ * Run:
  *   npx tsx src/withdraw-cli.ts
  */
 
@@ -42,22 +45,23 @@ interface Signature {
 // ============ Backend / device stubs (TODO) ============
 
 /**
- * TODO: 调后端 `GET /api/card`。
+ * TODO: call the backend `GET /api/card`.
  *
- * 请求时带上能唯一识别当前卡的凭据（设备 session / deviceId 之类，具体协议待定）。
- * 后端返回 CardInfo，其中 domainSeparator 与 withdrawTypehash 用于本地打包，
- * displayAmount 等用于 UI 展示。
+ * Include credentials that uniquely identify the current card in the request (device session / deviceId
+ * or similar; the exact protocol is TBD).
+ * The backend returns CardInfo, where domainSeparator and withdrawTypehash are used for local packing,
+ * and displayAmount etc. are used for UI display.
  */
 async function fetchCardInfo(): Promise<CardInfo> {
   throw new Error('TODO: implement backend GET /api/card');
 }
 
 /**
- * TODO: 调后端 `POST /api/verify-digest`。
+ * TODO: call the backend `POST /api/verify-digest`.
  *
- * 请求体：{ poolAddress, unlockAddress, to, digest }
- * 后端调用 `pool.getWithdrawDigest(unlockAddress, to)` 并与客户端提交的 digest 比对，
- * 返回 { ok: boolean }。
+ * Request body: { poolAddress, unlockAddress, to, digest }
+ * The backend calls `pool.getWithdrawDigest(unlockAddress, to)` and compares it against the digest
+ * submitted by the client, returning { ok: boolean }.
  */
 async function verifyDigestOnServer(_params: {
   poolAddress: Address;
@@ -69,19 +73,19 @@ async function verifyDigestOnServer(_params: {
 }
 
 /**
- * TODO: 对接硬件设备传输层（USB / BLE / 其他），把 32 字节 digest 推给设备，
- * 设备本地用户确认后返回 (v, r, s)。
+ * TODO: integrate with the hardware device transport layer (USB / BLE / other), push the 32-byte digest
+ * to the device, and return (v, r, s) after the user confirms locally on the device.
  */
 async function hardwareSign(_digest: Hex): Promise<Signature> {
   throw new Error('TODO: implement hardware device signing');
 }
 
 /**
- * TODO: 提交 withdraw 交易。
+ * TODO: submit the withdraw transaction.
  *
- * 两条路径任选：
- *   - 本地 walletClient 直接 writeContract(withdraw, ...)（见 src/index.ts）
- *   - POST 到代付服务（见 src/index.ts::submitWithdrawSponsored）
+ * Choose either of two paths:
+ *   - local walletClient calling writeContract(withdraw, ...) directly (see src/index.ts)
+ *   - POST to the sponsor service (see src/index.ts::submitWithdrawSponsored)
  */
 async function submitWithdraw(_params: {
   poolAddress: Address;

@@ -5,21 +5,21 @@ import "forge-std/Script.sol";
 import {HongBaoTokenFactory} from "../src/HongBao/token/HongBaoTokenFactory.sol";
 import {MockERC20} from "../test/mocks/MockERC20.sol";
 
-/// @title Deploy — 部署 HongBaoTokenFactory（以及可选的首个 HongBaoTokenPool）
+/// @title Deploy — Deploys HongBaoTokenFactory (and optionally the first HongBaoTokenPool)
 ///
-/// @notice 部署流程：
-///           1. 若未指定 TOKEN，则部署 MockERC20 并给部署者 mint 测试币
-///           2. 部署 HongBaoTokenFactory
-///           3. 若 CREATE_POOL=true（默认），通过 factory 创建一个
-///              (token, initiator) pool
+/// @notice Deployment flow:
+///           1. If TOKEN is not specified, deploy MockERC20 and mint test tokens to the deployer
+///           2. Deploy HongBaoTokenFactory
+///           3. If CREATE_POOL=true (default), create a
+///              (token, initiator) pool via the factory
 ///
-/// @notice 环境变量:
-///           TOKEN       — 已有 ERC20 地址（可选，留空则部署 MockERC20）
-///           INITIATOR   — Pool 的 initiator；留空默认为部署者；
-///                         显式传 0x000...0 表示开放池（任何人可存入）
-///           CREATE_POOL — 是否顺带创建首个 pool（可选，默认 true）
+/// @notice Environment variables:
+///           TOKEN       — Existing ERC20 address (optional, leave empty to deploy MockERC20)
+///           INITIATOR   — The pool's initiator; leave empty to default to the deployer;
+///                         explicitly pass 0x000...0 for an open pool (anyone can deposit)
+///           CREATE_POOL — Whether to also create the first pool (optional, default true)
 ///
-/// @notice 用法:
+/// @notice Usage:
 ///   forge script script/Deploy.s.sol \
 ///     --rpc-url $RPC_URL \
 ///     --private-key $PRIVATE_KEY \
