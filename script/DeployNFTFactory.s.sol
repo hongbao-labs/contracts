@@ -5,22 +5,22 @@ import "forge-std/Script.sol";
 import {HongBaoNFTFactory} from "../src/HongBao/nft/HongBaoNFTFactory.sol";
 import {MockERC721} from "../test/mocks/MockERC721.sol";
 
-/// @title DeployNFTFactory — 部署 HongBaoNFTFactory（以及可选的首个 HongBaoNFTPool）
+/// @title DeployNFTFactory — Deploys HongBaoNFTFactory (and optionally the first HongBaoNFTPool)
 ///
-/// @notice 部署流程：
-///           1. 若未指定 COLLECTION，则部署 MockERC721 并调用一次 freeMint()
-///              给部署者发一个 tokenId（其他参与者后续也可自助 freeMint）
-///           2. 部署 HongBaoNFTFactory
-///           3. 若 CREATE_POOL=true（默认），通过 factory 创建一个
-///              (collection, initiator) pool
+/// @notice Deployment flow:
+///           1. If COLLECTION is not specified, deploy MockERC721 and call freeMint() once
+///              to issue a tokenId to the deployer (other participants can also self-serve freeMint later)
+///           2. Deploy HongBaoNFTFactory
+///           3. If CREATE_POOL=true (default), create a
+///              (collection, initiator) pool via the factory
 ///
-/// @notice 环境变量：
-///           COLLECTION  — 已有 ERC721 地址（可选，留空则部署 MockERC721）
-///           INITIATOR   — Pool 的 initiator（可选，留空默认为部署者）；
-///                         NFT pool 没有开放模式，initiator 必须非零
-///           CREATE_POOL — 是否顺带创建首个 pool（可选，默认 true）
+/// @notice Environment variables:
+///           COLLECTION  — Existing ERC721 address (optional, leave empty to deploy MockERC721)
+///           INITIATOR   — The pool's initiator (optional, leave empty to default to the deployer);
+///                         NFT pools have no open mode, so initiator must be non-zero
+///           CREATE_POOL — Whether to also create the first pool (optional, default true)
 ///
-/// @notice 用法：
+/// @notice Usage:
 ///   forge script script/DeployNFTFactory.s.sol \
 ///     --rpc-url $RPC_URL \
 ///     --private-key $PRIVATE_KEY \

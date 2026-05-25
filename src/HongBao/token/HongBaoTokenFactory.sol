@@ -14,6 +14,14 @@ import {IHongBaoTokenFactory} from "./interfaces/IHongBaoTokenFactory.sol";
 ///         deployed with CREATE2 using `salt = keccak256(token, initiator)`,
 ///         and their addresses may be precomputed via `computePoolAddress`
 ///         before deployment.
+///
+///         TRUST ASSUMPTION — the factory does NOT vet `token`. Pools assume
+///         `token` is a standard fixed-supply ERC20 with no transfer fee, no
+///         rebasing, and no recipient-side transfer callbacks. Tokens that
+///         violate these assumptions break pool accounting or enable batch
+///         DoS. See `HongBaoTokenPool` doc header for the full list.
+///         Callers MUST independently audit `token` before relying on a pool
+///         returned by this factory.
 contract HongBaoTokenFactory is IHongBaoTokenFactory {
     /// @inheritdoc IHongBaoTokenFactory
     mapping(address => mapping(address => address)) public pools;

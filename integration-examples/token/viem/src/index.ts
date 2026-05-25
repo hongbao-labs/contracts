@@ -1,7 +1,18 @@
-import { createPublicClient, http, erc20Abi, parseAbi, formatUnits, type Address, type Hex } from 'viem';
+import {
+  createPublicClient,
+  encodeAbiParameters,
+  http,
+  erc20Abi,
+  keccak256,
+  parseAbi,
+  formatUnits,
+  type Address,
+  type Hex,
+} from 'viem';
 import { mainnet } from 'viem/chains';
 
 const HongBaoTokenPoolABI = parseAbi([
+  // basics — apply to all cards
   'function lockedToken() view returns (address)',
   'function initiator() view returns (address)',
   'function cardTotal(address unlockAddress) view returns (uint256)',
@@ -12,6 +23,17 @@ const HongBaoTokenPoolABI = parseAbi([
   'function remainingLockTime(address unlockAddress) view returns (uint256)',
   'function getWithdrawDigest(address unlockAddress, address to) view returns (bytes32)',
   'function withdraw(address unlockAddress, address to, uint8 v, bytes32 r, bytes32 s)',
+  // task card surface (returns zero values on plain cards)
+  'function cardTaskCount(address unlockAddress) view returns (uint8)',
+  'function cardBasicAmount(address unlockAddress) view returns (uint256)',
+  'function cardBoundTo(address unlockAddress) view returns (address)',
+  'function cardClosed(address unlockAddress) view returns (bool)',
+  'function task(address unlockAddress, uint8 taskIdx) view returns (bytes32 hash, uint256 amount, uint256 claimedAt)',
+  'function computeTaskHash(address unlockAddress, uint8 taskIdx, bytes n) view returns (bytes32)',
+  'function claimTask(address unlockAddress, uint8 taskIdx, bytes n)',
+  // relayer-oriented batch entry points (skip-silently on per-entry failure)
+  'function batchWithdraw(address[] unlockAddresses, address[] tos, uint8[] vs, bytes32[] rs, bytes32[] ss)',
+  'function batchClaimTask(address[] unlockAddresses, uint8[] taskIdxs, bytes[] preimages)',
 ]);
 
 // ============ Config ============
@@ -29,20 +51,25 @@ const publicClient = createPublicClient({
 // ============ Read: hongbao status ============
 
 export async function getHongbaoStatus(unlockAddress: Address) {
-  const [total, expire, unlockedAt, token] = await publicClient.multicall({
+  const [total, expire, unlockedAt, token, taskCount, basicAmount, boundTo, closed] = await publicClient.multicall({
     contracts: [
       { address: POOL_ADDRESS, abi: HongBaoTokenPoolABI, functionName: 'cardTotal', args: [unlockAddress] },
       { address: POOL_ADDRESS, abi: HongBaoTokenPoolABI, functionName: 'cardExpire', args: [unlockAddress] },
       { address: POOL_ADDRESS, abi: HongBaoTokenPoolABI, functionName: 'cardUnlockedAt', args: [unlockAddress] },
       { address: POOL_ADDRESS, abi: HongBaoTokenPoolABI, functionName: 'lockedToken' },
+      { address: POOL_ADDRESS, abi: HongBaoTokenPoolABI, functionName: 'cardTaskCount', args: [unlockAddress] },
+      { address: POOL_ADDRESS, abi: HongBaoTokenPoolABI, functionName: 'cardBasicAmount', args: [unlockAddress] },
+      { address: POOL_ADDRESS, abi: HongBaoTokenPoolABI, functionName: 'cardBoundTo', args: [unlockAddress] },
+      { address: POOL_ADDRESS, abi: HongBaoTokenPoolABI, functionName: 'cardClosed', args: [unlockAddress] },
     ],
     allowFailure: false,
   });
 
-  const isLocked = total > 0n && unlockedAt === 0n;
+  const isTaskCard = taskCount > 0;
+  const isLocked = total > 0n && !closed && (isTaskCard || unlockedAt === 0n);
 
   if (!isLocked) {
-    return { total, expire, unlockedAt, token, isLocked: false, isExpired: false } as const;
+    return { total, expire, unlockedAt, token, taskCount, closed, isLocked: false, isExpired: false } as const;
   }
 
   const now = BigInt(Math.floor(Date.now() / 1000));
@@ -58,16 +85,49 @@ export async function getHongbaoStatus(unlockAddress: Address) {
   const symbol = symbolResult.result!;
   const decimals = decimalsResult.result!;
 
-  return {
+  const base = {
     total,
     expire,
     unlockedAt,
     token,
-    isLocked: true,
+    isLocked: true as const,
     isExpired,
     tokenSymbol: symbol,
     tokenDecimals: decimals,
     displayAmount: formatUnits(total, decimals),
+  };
+
+  if (!isTaskCard) {
+    return { ...base, kind: 'plain' as const };
+  }
+
+  const tasks = await Promise.all(
+    Array.from({ length: taskCount }, (_, i) =>
+      publicClient.readContract({
+        address: POOL_ADDRESS,
+        abi: HongBaoTokenPoolABI,
+        functionName: 'task',
+        args: [unlockAddress, i],
+      }),
+    ),
+  );
+
+  return {
+    ...base,
+    kind: 'task' as const,
+    taskCount,
+    basicAmount,
+    basicDisplay: formatUnits(basicAmount, decimals),
+    boundTo,
+    closed,
+    tasks: tasks.map(([hash, amount, claimedAt], i) => ({
+      idx: i,
+      hash,
+      amount,
+      amountDisplay: formatUnits(amount, decimals),
+      claimedAt,
+      claimable: unlockedAt !== 0n && claimedAt === 0n,
+    })),
   };
 }
 
@@ -82,13 +142,52 @@ export async function getWithdrawDigest(unlockAddress: Address, to: Address) {
   });
 }
 
-// ============ Write: submit withdraw ============
-//
-// `withdraw` 无调用者限制，任何 EOA 都能提交。以下展示两种常见路径。
+// ============ Task card: commit hash + verify preimage ============
 
 /**
- * Path A — 用 App 侧钱包直接上链。
- * 使用处需传入一个 viem walletClient。
+ * Commit-hash formula used by HongBaoTokenPool: bound to (chainid, pool,
+ * unlockAddress, taskIdx) so a preimage cannot be reused across chains /
+ * pools / cards / slots. Mirrors `computeTaskHash` on the contract.
+ */
+export function computeTaskHashLocal(
+  chainId: bigint | number,
+  pool: Address,
+  unlockAddress: Address,
+  taskIdx: number,
+  preimage: Hex,
+): Hex {
+  return keccak256(
+    encodeAbiParameters(
+      [{ type: 'uint256' }, { type: 'address' }, { type: 'address' }, { type: 'uint8' }, { type: 'bytes' }],
+      [BigInt(chainId), pool, unlockAddress, taskIdx, preimage],
+    ),
+  );
+}
+
+/**
+ * Sanity-check a preimage against the on-chain committed hash before
+ * spending gas on `claimTask`. Returns false if the slot is already claimed.
+ */
+export async function verifyPreimage(unlockAddress: Address, taskIdx: number, preimage: Hex): Promise<boolean> {
+  const [hash, , claimedAt] = await publicClient.readContract({
+    address: POOL_ADDRESS,
+    abi: HongBaoTokenPoolABI,
+    functionName: 'task',
+    args: [unlockAddress, taskIdx],
+  });
+  if (claimedAt !== 0n) return false;
+  const chainId = await publicClient.getChainId();
+  const computed = computeTaskHashLocal(chainId, POOL_ADDRESS, unlockAddress, taskIdx, preimage);
+  return computed === hash;
+}
+
+// ============ Write: submit withdraw ============
+//
+// `withdraw` has no caller restriction; any EOA can submit it. Two common paths are shown below.
+
+/**
+ * Path A — submit on-chain directly with the App-side wallet.
+ * The caller must pass in a viem walletClient.
  */
 // export async function submitWithdrawOnchain(
 //   walletClient: WalletClient,
@@ -107,8 +206,8 @@ export async function getWithdrawDigest(unlockAddress: Address, to: Address) {
 // }
 
 /**
- * Path B — 交给 App 后端的代付服务。
- * 合约层面不区分，这一层纯业务。
+ * Path B — hand off to the App backend's sponsor service.
+ * The contract makes no distinction here; this layer is pure business logic.
  */
 const SPONSOR_API = process.env.SPONSOR_API;
 
@@ -136,28 +235,49 @@ async function main() {
   const unlockAddress: Address = '0x0000000000000000000000000000000000000001'; // TODO: replace
   const recipient: Address = '0x0000000000000000000000000000000000000002'; // TODO: replace
 
-  // 1. 查询红包状态
+  // 1. Query the red packet status
   const status = await getHongbaoStatus(unlockAddress);
 
   if (!status.isLocked) {
-    console.log('Hongbao already claimed or does not exist');
+    console.log('Hongbao not claimable (already claimed, closed, or does not exist)');
     return;
   }
 
-  console.log(`Hongbao: ${status.displayAmount} ${status.tokenSymbol}`);
-  console.log(`Expired: ${status.isExpired}`);
+  if (status.kind === 'plain') {
+    console.log(`Plain card: ${status.displayAmount} ${status.tokenSymbol}, expired=${status.isExpired}`);
+    // 2. Get the digest for the hardware to sign → submit withdraw
+    const digest = await getWithdrawDigest(unlockAddress, recipient);
+    console.log(`Digest to sign: ${digest}`);
+    // const { v, r, s } = await hardwareSign(digest);
+    // await submitWithdrawSponsored(unlockAddress, recipient, v, r, s);
+    return;
+  }
 
-  // 2. 获取 digest 给硬件签名
-  const digest = await getWithdrawDigest(unlockAddress, recipient);
-  console.log(`Digest to sign: ${digest}`);
+  // Task card branch
+  console.log(`Task card: basic=${status.basicDisplay} ${status.tokenSymbol}, ${status.taskCount} task(s)`);
+  console.log(`Bound to: ${status.boundTo === '0x0000000000000000000000000000000000000000' ? '(not yet)' : status.boundTo}`);
 
-  // 3. 发送 digest 到硬件设备，拿到 v, r, s
-  // const { v, r, s } = await hardwareSign(digest);
+  if (status.unlockedAt === 0n) {
+    // Phase 1: bind. Same flow as plain card, but only basicAmount comes out and the card stays active.
+    const digest = await getWithdrawDigest(unlockAddress, recipient);
+    console.log(`Digest to sign (binds to=${recipient}): ${digest}`);
+    // → hardware sign → submit withdraw → boundTo permanently locked
+    return;
+  }
 
-  // 4. 提交 withdraw（Path A 自付 / Path B 代付）
-  // const txHash = await submitWithdrawOnchain(walletClient, unlockAddress, recipient, v, r, s);
-  // or:
-  // await submitWithdrawSponsored(unlockAddress, recipient, v, r, s);
+  // Phase 2: claim tasks. boundTo already set; any caller can submit a valid preimage.
+  for (const t of status.tasks) {
+    if (!t.claimable) continue;
+    // const preimage = await fetchPreimageFromProject(unlockAddress, t.idx);
+    // if (!(await verifyPreimage(unlockAddress, t.idx, preimage))) throw new Error('bad preimage');
+    // await walletClient.writeContract({
+    //   address: POOL_ADDRESS,
+    //   abi: HongBaoTokenPoolABI,
+    //   functionName: 'claimTask',
+    //   args: [unlockAddress, t.idx, preimage],
+    // });
+    console.log(`task[${t.idx}] claimable for ${t.amountDisplay} ${status.tokenSymbol}`);
+  }
 }
 
 main().catch(console.error);

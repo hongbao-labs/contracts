@@ -38,6 +38,19 @@ import {ReentrancyGuard} from "../shared/utils/ReentrancyGuard.sol";
 ///         vet the collection — preferably non-upgradeable. Not enforced
 ///         by the factory.
 ///
+///         APPROVAL HYGIENE: the push-path entry (`onERC721Received`) only
+///         checks `from == initiator`. Per ERC721 semantics, that `from` is
+///         supplied by the collection, and any account holding an active
+///         operator approval from the initiator (e.g. via
+///         `setApprovalForAll(operator, true)` on the collection) can move
+///         the initiator's NFT into this pool with arbitrary
+///         `(unlockAddress, lockTime)` data — effectively letting that
+///         operator mint cards on the initiator's behalf, and potentially
+///         to an `unlockAddress` whose device key the operator controls.
+///         The initiator MUST keep collection-level approvals tight:
+///         approve only this pool (or a dedicated relayer with equivalent
+///         trust), never blanket-approve unfamiliar contracts.
+///
 ///         This contract holds no administrative privileges: no owner, no
 ///         pause, no upgradability, no fees.
 contract HongBaoNFTPool is IHongBaoNFTPool, IERC721Receiver, ReentrancyGuard {
@@ -304,6 +317,13 @@ contract HongBaoNFTPool is IHongBaoNFTPool, IERC721Receiver, ReentrancyGuard {
     }
 
     function _verifySignature(address unlockAddress, address to, uint8 v, bytes32 r, bytes32 s) internal view {
+        // Reject high-S signatures (EIP-2 / OZ ECDSA canonical form). `ecrecover`
+        // accepts both `s` and `n - s`, which yields two distinct (v, r, s)
+        // triples for the same signer/message; rejecting the upper half makes
+        // the on-chain signature canonical.
+        if (uint256(s) > 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0) {
+            revert InvalidSignature();
+        }
         bytes32 digest = _getDigest(unlockAddress, to);
         address recovered = ecrecover(digest, v, r, s);
         if (recovered == address(0) || recovered != unlockAddress) revert InvalidSignature();

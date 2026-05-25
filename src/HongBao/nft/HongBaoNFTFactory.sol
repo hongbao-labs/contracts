@@ -12,6 +12,16 @@ import {IHongBaoNFTFactory} from "./interfaces/IHongBaoNFTFactory.sol";
 ///         are deployed with CREATE2 using `salt = keccak256(collection,
 ///         initiator)` and their addresses may be precomputed via
 ///         `computePoolAddress` before deployment.
+///
+///         TRUST ASSUMPTION — the factory does NOT vet `collection`. A
+///         malicious or upgradeable ERC721 implementation can register
+///         phantom cards (no NFT actually held) and permanently brick
+///         `unlockAddress` slots, since cards on `HongBaoNFTPool` are
+///         one-shot. See `HongBaoNFTPool` doc header for the full trust
+///         model. Callers and integrators MUST independently audit
+///         `collection` (preferably non-upgradeable, audited, standard
+///         ERC721 behavior) before relying on a pool returned by this
+///         factory.
 contract HongBaoNFTFactory is IHongBaoNFTFactory {
     /// @inheritdoc IHongBaoNFTFactory
     mapping(address => mapping(address => address)) public pools;

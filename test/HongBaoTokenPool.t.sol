@@ -210,6 +210,21 @@ contract HongBaoTokenPoolRestrictedTest is Test {
         pool.withdraw(cardAddr, recipient, v, r, s);
     }
 
+    /// @dev L-1 audit fix: high-S signatures (the malleable "other half" of a
+    ///      canonical signature) must be rejected.
+    function test_withdraw_revert_high_s_signature() public {
+        _deposit100();
+        (uint8 v, bytes32 r, bytes32 s) = _sign(cardPk, recipient);
+
+        // Flip to the high-S equivalent: s' = n - s, v' = 27 ^ 28 of original
+        uint256 n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
+        bytes32 highS = bytes32(n - uint256(s));
+        uint8 flippedV = v == 27 ? 28 : 27;
+
+        vm.expectRevert(IHongBaoTokenPool.InvalidSignature.selector);
+        pool.withdraw(cardAddr, recipient, flippedV, r, highS);
+    }
+
     function test_withdraw_revert_no_deposit() public {
         (uint8 v, bytes32 r, bytes32 s) = _sign(cardPk, recipient);
         vm.expectRevert(abi.encodeWithSelector(IHongBaoTokenPool.NoDeposit.selector, cardAddr));

@@ -1,21 +1,21 @@
 /**
- * HongBao CreatePool — 通过 HongBaoTokenFactory 部署一个新 pool
+ * HongBao CreatePool — deploy a new pool via HongBaoTokenFactory
  *
- * 对应合约调用：
+ * Corresponding contract call:
  *   HongBaoTokenFactory.createPool(token, initiator) -> address pool
  *
- * 每一对 (token, initiator) 在一个 factory 下只能创建一次；重复调用会 revert。
- * pool 地址由 CREATE2 确定，可用 computePoolAddress 提前算出。
+ * Each (token, initiator) pair can be created only once under a given factory; a repeat call reverts.
+ * The pool address is determined by CREATE2 and can be computed ahead of time with computePoolAddress.
  *
- * 环境变量:
- *   RPC_URL           — RPC 节点地址
- *   PRIVATE_KEY       — 部署者私钥（付 gas）
- *   FACTORY_ADDRESS   — HongBaoTokenFactory 合约地址
- *   TOKEN             — 池锁定的 ERC20 代币地址
- *   INITIATOR         — 可选；传地址表示"仅该地址可存入"，
- *                       省略或传 0x000...0 表示开放池（任何人可存入）
+ * Environment variables:
+ *   RPC_URL           — RPC node address
+ *   PRIVATE_KEY       — deployer private key (pays gas)
+ *   FACTORY_ADDRESS   — HongBaoTokenFactory contract address
+ *   TOKEN             — address of the ERC20 token locked by the pool
+ *   INITIATOR         — optional; passing an address means "only this address can deposit",
+ *                       omitting it or passing 0x000...0 means an open pool (anyone can deposit)
  *
- * 用法:
+ * Usage:
  *   RPC_URL=... PRIVATE_KEY=0x... FACTORY_ADDRESS=0x... TOKEN=0x... \
  *     npx tsx src/create-pool.ts
  */
@@ -51,7 +51,7 @@ async function main() {
     transport: http(rpcUrl),
   });
 
-  // 1. 先查 registry，避免白白发一个会 revert 的 tx
+  // 1. Check the registry first, to avoid wastefully sending a tx that would revert
   const existing = await publicClient.readContract({
     address: factory,
     abi: HongBaoTokenFactoryABI,
@@ -63,7 +63,7 @@ async function main() {
     return;
   }
 
-  // 2. 预计算 CREATE2 地址（可用于前端展示 / 监听事件前的预提交）
+  // 2. Pre-compute the CREATE2 address (usable for frontend display / pre-commit before listening for events)
   const predicted = await publicClient.readContract({
     address: factory,
     abi: HongBaoTokenFactoryABI,
@@ -78,7 +78,7 @@ async function main() {
   console.log('Predicted: ', predicted);
   console.log();
 
-  // 3. 发送创建交易
+  // 3. Send the creation transaction
   const { request } = await publicClient.simulateContract({
     account,
     address: factory,
@@ -94,7 +94,7 @@ async function main() {
   console.log('Tx status: ', receipt.status);
   console.log('Gas used:  ', receipt.gasUsed.toString());
 
-  // 4. 从 registry 读出最终地址并核对
+  // 4. Read the final address from the registry and verify it
   const deployed = await publicClient.readContract({
     address: factory,
     abi: HongBaoTokenFactoryABI,

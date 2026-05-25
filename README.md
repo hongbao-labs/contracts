@@ -1,30 +1,44 @@
-# HongBao — 锁仓红包合约
+# HongBao — Time-Locked Red Packet Contracts
 
-基于硬件签名设备的一次性锁仓红包合约。项目方将资产存入并绑定到卡片公钥地址，持卡人通过设备签名解锁资产。两套合约共享同一交互模型，分别支持 **ERC20** 与 **ERC721**：
+*[中文版 / Chinese version →](./README_CN.md)*
 
-| 变体 | 资产 | Pool | Factory | 集成文档 |
+Time-locked red-packet contracts built around hardware signing devices. A project deposits assets and binds them to a card's public-key address; the card holder unlocks the assets with a device signature. Both contract families share one interaction model, supporting **ERC20** and **ERC721** respectively:
+
+| Variant | Asset | Pool | Factory | Integration docs |
 |------|------|------|---------|----------|
 | Token | ERC20 | `HongBaoTokenPool` | `HongBaoTokenFactory` | [integration-examples/token](./integration-examples/token/README.md) |
 | NFT   | ERC721 | `HongBaoNFTPool` | `HongBaoNFTFactory` | [integration-examples/nft](./integration-examples/nft/README.md) |
 
-合约完全去中心化：无 owner、无 pause、无手续费、无特权中继。
+The Token pool supports two card flavors:
 
-## 核心流程
+- **Plain card** — one signature redeems the full balance; a traditional red packet.
+- **Task card** — one signature only binds the recipient address and releases `basicAmount`; afterwards, for each completed task the project issues a preimage and **anyone** submits `claimTask` to force the task reward to the already-bound address. A CTF-flag-style progressive unlock that turns the signature from a "claim voucher" into a "binding voucher".
+
+The contracts are fully decentralized: no owner, no pause, no fees, no privileged relayer.
+
+## Core Flow
 
 ```
-1. 项目方调用 deposit() 存入资产，绑定到卡片公钥地址
-2. 持卡人通过硬件设备签名 Withdraw(unlockAddress, to)
-3. 任何人提交签名，调用 withdraw() 解锁资产到 to
-4. 若过期未领取，initiator/depositor 调用 withdrawExpired() 取回
+Plain card:
+  1. Project calls deposit() to lock assets
+  2. Card holder signs Withdraw(unlockAddress, to) with the device
+  3. Anyone submits withdraw() → full amount to `to`, card consumed
+  4. Unredeemed past expiry → initiator/depositor reclaims via withdrawExpired()
+
+Task card (Token only, restricted mode):
+  1. Project calls depositWithTasks() to lock the card + publish taskHashes[] on-chain
+  2. Card holder signs Withdraw(unlockAddress, to) → withdraw() sends basicAmount to `to` and permanently binds boundTo
+  3. User completes a task → project issues the preimage → anyone calls claimTask() to force funds to boundTo
+  4. Unredeemed past expiry → initiator reclaims the remainder in one shot via withdrawExpired() and closes the card
 ```
 
-ERC20 与 ERC721 在签名层面完全一致（同一 EIP-712 schema），仅资产类型与少量管理细节不同 —— 详见 [集成示例索引](./integration-examples/README.md) 中的差异表。
+ERC20 and ERC721 are identical at the signing layer (same EIP-712 schema); only the asset type and a few management details differ — see the comparison table in the [integration examples index](./integration-examples/README.md).
 
-## 合约架构
+## Contract Architecture
 
 ```
 src/HongBao/
-├── shared/                              # 跨变体共用
+├── shared/                              # shared across variants
 │   ├── interfaces/
 │   │   ├── IERC20.sol
 │   │   ├── IERC721.sol
@@ -33,205 +47,244 @@ src/HongBao/
 │   │   └── SafeERC20.sol
 │   └── utils/
 │       └── ReentrancyGuard.sol
-├── token/                               # ERC20 变体
-│   ├── HongBaoTokenFactory.sol          # CREATE2 工厂 + 注册表
-│   ├── HongBaoTokenPool.sol             # 单 (token, initiator) 红包池
+├── token/                               # ERC20 variant
+│   ├── HongBaoTokenFactory.sol          # CREATE2 factory + registry
+│   ├── HongBaoTokenPool.sol             # single (token, initiator) red-packet pool
 │   └── interfaces/
 │       ├── IHongBaoTokenFactory.sol
 │       └── IHongBaoTokenPool.sol
-└── nft/                                 # ERC721 变体
-    ├── HongBaoNFTFactory.sol            # CREATE2 工厂 + 注册表
-    ├── HongBaoNFTPool.sol               # 单 (collection, initiator) 红包池
+└── nft/                                 # ERC721 variant
+    ├── HongBaoNFTFactory.sol            # CREATE2 factory + registry
+    ├── HongBaoNFTPool.sol               # single (collection, initiator) red-packet pool
     └── interfaces/
         ├── IHongBaoNFTFactory.sol
         └── IHongBaoNFTPool.sol
 ```
 
-每个项目方为每种资产部署一个独立 pool 实例，通过对应的 Factory 标准化部署。
+Each project deploys an independent pool instance per asset, standardized through the corresponding factory.
 
-## Pool 模式
+## Pool Modes
 
-构造参数 `initiator` 决定 pool 的权限模式。两套 pool 的判定规则相同，但 NFT 版本只支持限定模式：
+The constructor parameter `initiator` determines the pool's permission mode. Both pools share the same decision rule, but the NFT variant supports restricted mode only:
 
 | `initiator` | Token Pool | NFT Pool |
 |---|---|---|
-| `address(0)` | **开放模式** —— 任何人都能 deposit，按 depositor 记账份额 | 不支持（构造时 revert `ZeroInitiator`） |
-| 非零地址 | **限定模式** —— 仅该地址可 deposit | 唯一支持的模式 |
+| `address(0)` | **Open mode** — anyone can deposit; shares are accounted per depositor | Not supported (constructor reverts `ZeroInitiator`) |
+| Non-zero address | **Restricted mode** — only that address may deposit | The only supported mode |
 
-Token 开放模式下多个 depositor 可给同一张卡续充（topup），解锁时一次性全额转给 `to`，过期后各自按份额取回。NFT 仅限定模式：一张卡只持有一个 tokenId，没有续充语义，过期由 initiator 取回。
+In Token open mode, multiple depositors can top up the same card; on redemption the full balance goes to `to` in one shot, and after expiry each depositor reclaims their own share. The NFT pool is restricted-only: a card holds exactly one tokenId, has no top-up semantics, and is reclaimed by the initiator after expiry.
 
-## 签名机制
+## Signing Mechanism
 
-EIP-712 schema（两套合约一致）：
+EIP-712 schema (identical for both contracts):
 
 ```
 Withdraw(address unlockAddress, address to)
 ```
 
-- Domain: `name="HongBao"`, `version="1"`, `chainId`, `verifyingContract`（每个 pool 独立）
-- 单次签名：`unlockedAt != 0` 后无法再次提取，无需 nonce
-- 防跨链/跨合约重放：Domain 绑 chainId + pool 地址
+- Domain: `name="HongBao"`, `version="1"`, `chainId`, `verifyingContract` (unique per pool)
+- Single-use signature: once `unlockedAt != 0` it can no longer be withdrawn; no nonce needed
+- Cross-chain / cross-contract replay protection: the domain binds `chainId` + pool address
 
-> ⚠️ **NFT 特别注意**：合约 withdraw 内部用 `safeTransferFrom`，`to` 必须能接收 ERC721。硬件设备每张卡只能签一次，签错了 `to`（如不实现 `IERC721Receiver` 的合约）这张卡就报废。集成方在让设备签名前必须校验 `to`。详见 [integration-examples/nft/README.md](./integration-examples/nft/README.md)。
+> ⚠️ **NFT note**: the contract's withdraw uses `safeTransferFrom` internally, so `to` must be able to receive ERC721. The hardware device signs each card only once; signing the wrong `to` (e.g. a contract that does not implement `IERC721Receiver`) bricks the card. Integrators must validate `to` before letting the device sign. See [integration-examples/nft/README.md](./integration-examples/nft/README.md).
 
-## 核心函数
+## Core Functions
 
-### Token Pool（`HongBaoTokenPool`）
+### Token Pool (`HongBaoTokenPool`)
 
-#### 存款
+The Token pool supports two card flavors:
 
-| 函数 | 说明 |
-|---|---|
-| `deposit(unlockAddress, amount, lockTime)` | 存入 ERC20，首次 `lockTime >= MIN_LOCK_TIME`；续充忽略 `lockTime` |
-| `batchDeposit(unlockAddresses[], amount, lockTime)` | 批量，每张卡相同 amount/lockTime |
+- **Plain card (`cardTaskCount == 0`)** — one signature redeems the full balance, matching the original ERC20 design.
+- **Task card (`cardTaskCount > 0`)** — a "gift card + complete-tasks-to-earn" model. One signature only binds `to` and releases `basicAmount`; afterwards the project issues a preimage for each task and **anyone** submits `claimTask` to force that task's amount to `boundTo`. Restricted mode only.
 
-#### 提取
+#### Deposits
 
-| 函数 | 调用者 | 说明 |
+| Function | Card type | Notes |
 |---|---|---|
-| `withdraw(unlockAddress, to, v, r, s)` | 任何人 | 全额转给 `to`，卡片消费 |
-| `withdrawExpired(unlockAddress)` | depositor | 取回自己份额；严格 revert |
-| `batchWithdrawExpired(unlockAddresses[])` | depositor | 批量；已兑付/无份额条目静默跳过 |
+| `deposit(unlockAddress, amount, lockTime)` | Plain / task-card top-up | Creates a plain card on first deposit / tops up `basicAmount` on any card; first deposit needs `lockTime >= MIN_LOCK_TIME`, top-ups ignore it |
+| `batchDeposit(unlockAddresses[], amount, lockTime)` | Plain | Batch plain cards, same amount/lockTime each |
+| `depositWithTasks(unlockAddress, basicAmount, taskHashes[], taskAmounts[], lockTime)` | Task | Creates a task card in one shot; hashes/amounts are immutable once on-chain |
+| `batchDepositWithTasks(unlockAddresses[], basicAmounts[], taskHashes[][], taskAmounts[][], lockTime)` | Task | Atomic batch of arbitrarily-shaped task cards, one `safeTransferFrom` for the grand total |
 
-#### View
+#### Withdrawals
 
-| 函数 | 返回 |
-|---|---|
-| `cardTotal(unlockAddress)` | 当前可领取总额 |
-| `cardExpire(unlockAddress)` | 过期时间戳 |
-| `cardUnlockedAt(unlockAddress)` | 兑付时间戳（0 = 未兑付） |
-| `depositRecord(unlockAddress, depositor)` | 某 depositor 的份额 |
-| `lockedToken()` | 绑定的 ERC20 地址 |
-| `initiator()` | 限定模式下的唯一 depositor（开放模式为 0） |
-
-### NFT Pool（`HongBaoNFTPool`）
-
-#### 存款
-
-| 函数 | 说明 |
-|---|---|
-| `deposit(unlockAddress, tokenId, lockTime)` | Pull 路径。initiator 提前 approve 后调用 |
-| `onERC721Received(...)` | Push 路径。initiator 直接 `safeTransferFrom(initiator, pool, tokenId, abi.encode(unlockAddress, lockTime))` |
-
-NFT 没有 `batchDeposit` —— 一张卡只持有一个 tokenId，批量在脚本层用循环实现（见 `script/BatchDepositNFT.s.sol`）。
-
-#### 提取
-
-| 函数 | 调用者 | 说明 |
+| Function | Caller | Notes |
 |---|---|---|
-| `withdraw(unlockAddress, to, v, r, s)` | 任何人 | 转 NFT 给 `to`（用 `safeTransferFrom`），卡片消费 |
-| `withdrawExpired(unlockAddress)` | initiator | 取回 NFT；严格 revert |
-| `batchWithdrawExpired(unlockAddresses[])` | initiator | 批量；已兑付/无 deposit 静默跳过；单条 `safeTransferFrom` 失败也跳过，状态保留以便重试 |
+| `withdraw(unlockAddress, to, v, r, s)` | Anyone | Plain card: full amount to `to`, card consumed. Task card: sends `basicAmount` + permanently binds `boundTo = to`, card stays active |
+| `batchWithdraw(unlockAddresses[], tos[], vs[], rs[], ss[])` | Anyone (relayer) | Batch withdraw; bad-signature / already-redeemed / closed / zero-`to` entries are silently skipped without poisoning the batch |
+| `claimTask(unlockAddress, taskIdx, n)` | Anyone | Verifies `keccak256(abi.encode(chainid, pool, unlockAddress, taskIdx, n)) == taskHashes[taskIdx]`, sends `taskAmounts[taskIdx]` to `boundTo`. Requires a prior `withdraw` binding |
+| `batchClaimTask(unlockAddresses[], taskIdxs[], preimages[])` | Anyone (relayer) | Batch claim; not-a-task-card / out-of-range / closed / not-bound / already-claimed / wrong-preimage entries are silently skipped |
+| `withdrawExpired(unlockAddress)` | Plain: depositor; task: initiator | Plain card reclaims per share; task card initiator reclaims the remainder in one shot and sets `closed = true` |
+| `batchWithdrawExpired(unlockAddresses[])` | Same as above | Batch; closed / already-redeemed / no-share entries are silently skipped; plain + task cards may be mixed in one batch |
 
-#### View
+> `batchWithdraw` / `batchClaimTask` are skip-silently by design, for relayers: if one of N requests in a batch has stale state or a bad signature, it should not drag down the other N-1. Off-chain consumers determine which succeeded via the `Withdrawn` / `TaskClaimed` events.
 
-| 函数 | 返回 |
+#### Views
+
+| Function | Returns |
 |---|---|
-| `cardTokenId(unlockAddress)` | 卡片绑定的 tokenId（**注意**：0 是合法值，需用 `cardExpire != 0` 判定是否存在）|
-| `cardExpire(unlockAddress)` | 过期时间戳（0 表示卡不存在） |
-| `cardUnlockedAt(unlockAddress)` | 兑付时间戳（0 = 未兑付） |
-| `lockedCollection()` | 绑定的 ERC721 collection 地址 |
-| `initiator()` | 唯一 depositor（保证非零） |
+| `cardTotal(unlockAddress)` | Current remaining claimable total (unredeemed basic + unclaimed task amounts) |
+| `cardBasicAmount(unlockAddress)` | Amount the next `withdraw` will release; for plain cards this mirrors `cardTotal` |
+| `cardTaskCount(unlockAddress)` | 0 = plain card, >0 = task card |
+| `cardBoundTo(unlockAddress)` | The `to` bound after a task card's `withdraw` (returns 0 for plain or unbound cards) |
+| `cardClosed(unlockAddress)` | Whether a task card has been closed by the initiator via `withdrawExpired` |
+| `cardExpire(unlockAddress)` | Expiration timestamp |
+| `cardUnlockedAt(unlockAddress)` | Redemption timestamp (plain = claim time; task = basic-withdraw time) |
+| `task(unlockAddress, taskIdx)` | `(hash, amount, claimedAt)` |
+| `computeTaskHash(unlockAddress, taskIdx, n)` | Off-chain verification helper, equivalent to `keccak256(abi.encode(chainid, pool, unlockAddress, taskIdx, n))` |
+| `depositRecord(unlockAddress, depositor)` | A depositor's share (used by open-mode plain cards) |
+| `lockedToken()` | The bound ERC20 address |
+| `initiator()` | The sole depositor in restricted mode (0 in open mode; always non-zero for task cards) |
+| `MAX_TASKS_PER_CARD()` | 255 |
 
-### 共用 View（两套 pool 一致）
+### NFT Pool (`HongBaoNFTPool`)
 
-| 函数 | 返回 |
+#### Deposits
+
+| Function | Notes |
 |---|---|
-| `isLocked(unlockAddress)` | 是否仍持有资产 |
-| `isExpired(unlockAddress)` | 是否已过期且未兑付 |
-| `remainingLockTime(unlockAddress)` | 剩余锁定秒数 |
-| `getWithdrawDigest(unlockAddress, to)` | EIP-712 签名 digest |
+| `deposit(unlockAddress, tokenId, lockTime)` | Pull path. Called after the initiator approves the pool |
+| `onERC721Received(...)` | Push path. The initiator directly calls `safeTransferFrom(initiator, pool, tokenId, abi.encode(unlockAddress, lockTime))` |
+
+The NFT pool has no `batchDeposit` — a card holds exactly one tokenId, so batching is done at the script layer with a loop (see `script/BatchDepositNFT.s.sol`).
+
+#### Withdrawals
+
+| Function | Caller | Notes |
+|---|---|---|
+| `withdraw(unlockAddress, to, v, r, s)` | Anyone | Transfers the NFT to `to` (via `safeTransferFrom`), card consumed |
+| `withdrawExpired(unlockAddress)` | initiator | Reclaims the NFT; strict revert |
+| `batchWithdrawExpired(unlockAddresses[])` | initiator | Batch; already-redeemed / no-deposit entries are silently skipped; a per-entry `safeTransferFrom` failure is also skipped, leaving state intact for retry |
+
+#### Views
+
+| Function | Returns |
+|---|---|
+| `cardTokenId(unlockAddress)` | The card's bound tokenId (**note**: 0 is a valid value; use `cardExpire != 0` to test existence) |
+| `cardExpire(unlockAddress)` | Expiration timestamp (0 means the card does not exist) |
+| `cardUnlockedAt(unlockAddress)` | Redemption timestamp (0 = not redeemed) |
+| `lockedCollection()` | The bound ERC721 collection address |
+| `initiator()` | The sole depositor (guaranteed non-zero) |
+
+### Shared Views (identical for both pools)
+
+| Function | Returns |
+|---|---|
+| `isLocked(unlockAddress)` | Whether the asset is still held |
+| `isExpired(unlockAddress)` | Whether it is expired and unredeemed |
+| `remainingLockTime(unlockAddress)` | Remaining lock seconds |
+| `getWithdrawDigest(unlockAddress, to)` | EIP-712 signing digest |
 | `DOMAIN_SEPARATOR()` | EIP-712 domain separator |
 | `WITHDRAW_TYPEHASH()` | EIP-712 type hash |
-| `MIN_LOCK_TIME()` | 最小锁定时长（30 天）|
+| `MIN_LOCK_TIME()` | Minimum lock duration (30 days) |
 
 ### Factory
 
-`HongBaoTokenFactory` 与 `HongBaoNFTFactory` 接口完全对称，仅资产参数命名不同：
+`HongBaoTokenFactory` and `HongBaoNFTFactory` have fully symmetric interfaces, differing only in the asset parameter name:
 
-| Token Factory | NFT Factory | 说明 |
+| Token Factory | NFT Factory | Notes |
 |---|---|---|
-| `createPool(token, initiator)` | `createPool(collection, initiator)` | CREATE2 部署新 pool；`(asset, initiator)` 唯一 |
-| `pools(token, initiator)` | `pools(collection, initiator)` | 查询已注册 pool 地址（未部署返回 0） |
-| `computePoolAddress(token, initiator)` | `computePoolAddress(collection, initiator)` | 确定性地址，部署前就能算出 |
+| `createPool(token, initiator)` | `createPool(collection, initiator)` | CREATE2-deploys a new pool; `(asset, initiator)` is unique |
+| `pools(token, initiator)` | `pools(collection, initiator)` | Look up a registered pool address (returns 0 if not deployed) |
+| `computePoolAddress(token, initiator)` | `computePoolAddress(collection, initiator)` | Deterministic address, computable before deployment |
 
-> NFT Factory 的 `createPool` 拒绝 `initiator == 0`，与 NFT pool 仅限定模式的设计一致。
+> The NFT factory's `createPool` rejects `initiator == 0`, consistent with the NFT pool's restricted-only design.
 
-## 常量
+## Constants
 
-| 常量 | 值 |
+| Constant | Value |
 |---|---|
-| `MIN_LOCK_TIME` | 30 天（两套 pool 硬编码） |
+| `MIN_LOCK_TIME` | 30 days (hardcoded in both pools) |
 | `WITHDRAW_TYPEHASH` | `keccak256("Withdraw(address unlockAddress,address to)")` |
 
-## 开发
+## Development
 
 ```bash
-# 编译
+# Build (optimizer + via_ir enabled, see foundry.toml)
 forge build
 
-# 跑全量测试（71 tests，覆盖 Token / NFT 变体）
+# Run the full test suite (130 tests, covering Token / NFT / task cards)
 forge test -vv
 
-# 仅 Token 测试
+# Token tests only
 forge test --match-path "test/HongBaoToken*.t.sol" -vv
 
-# 仅 NFT 测试
+# NFT tests only
 forge test --match-path "test/HongBaoNFT*.t.sol" -vv
 ```
 
-### 测试覆盖
+### Test Coverage
 
-- **HongBaoTokenPool 限定模式（33 tests）**: deposit / batchDeposit / topup / withdraw / withdrawExpired / batchWithdrawExpired（含跳过已兑付与零份额的用例）/ views / 构造参数校验
-- **HongBaoTokenPool 开放模式（4 tests）**: 多 depositor 同一卡 / 一次 withdraw 清扫所有 depositor / 过期按份额取回 / 抢跑 grief 场景
-- **HongBaoTokenFactory（8 tests）**: `createPool` 正常 / 重复 `PoolExists` / `computePoolAddress` 与实际部署地址一致 / 开放模式 pool / 不同 (token, initiator) 组合
-- **HongBaoNFTPool（19 tests）**: pull / push deposit / withdraw / withdrawExpired / batchWithdrawExpired / 接收方兼容性 / views / 构造参数校验
-- **HongBaoNFTFactory（3 tests）**: `createPool` 正常 / 重复 `PoolExists` / `computePoolAddress` 与实际部署地址一致
-- **SignTest（4 tests）**: 设备签名与 EVM `ecrecover` 兼容性
+- **HongBaoTokenPool plain card, restricted mode (34 tests)**: deposit / batchDeposit / topup / withdraw / withdrawExpired / batchWithdrawExpired (including skip cases for already-redeemed and zero-share) / high-S signature rejection / views / constructor parameter checks
+- **HongBaoTokenPool plain card, open mode (4 tests)**: multiple depositors on one card / a single withdraw sweeping all depositors / per-share reclaim after expiry / front-run grief scenario
+- **HongBaoTokenPool task card (45 tests)**: depositWithTasks (happy / edge cases / all reverts) / topup into basic / withdraw releasing basic + binding boundTo / claimTask (happy / callable by anyone / hash binding defeats cross-chain + cross-card reuse / still claimable past expiry before close / reverts after close) / withdrawExpired task-card branch / batchWithdrawExpired mixing plain + task cards / batchDepositWithTasks atomic rollback on failure / views
+- **HongBaoTokenPool batchWithdraw / batchClaimTask (17 tests)**: happy path for both batch functions (multiple tasks on one card, across cards) / skip-silently (bad signature, already redeemed, zero `to`, wrong preimage, basic not completed, closed, out-of-range idx, not a task card, already-claimed slot) / length checks
+- **HongBaoTokenFactory (8 tests)**: `createPool` happy path / duplicate `PoolExists` / `computePoolAddress` matches the actual deployed address / open-mode pool / different (token, initiator) combinations
+- **HongBaoNFTPool (19 tests)**: pull / push deposit / withdraw / withdrawExpired / batchWithdrawExpired / recipient compatibility / views / constructor parameter checks
+- **HongBaoNFTFactory (3 tests)**: `createPool` happy path / duplicate `PoolExists` / `computePoolAddress` matches the actual deployed address
 
-## 部署脚本
+## Deployment Scripts
 
-### Token 变体
+### Token Variant
 
 ```bash
-# 1. 部署 Factory（一次性）
+# 1. Deploy the factory (one-time)
 forge script script/DeployFactory.s.sol --rpc-url $RPC --private-key $PK --broadcast
 
-# 2. 创建 Pool（每个 token × 每个 initiator 一次）
+# 2. Create a pool (once per token × initiator)
 FACTORY=0x... TOKEN=0x... INITIATOR=0x... \
 forge script script/CreatePool.s.sol --rpc-url $RPC --private-key $PK --broadcast
 
-# 3. 批量存款（每个 mint 批次）
+# 3a. Plain card batch deposit (same amount each)
 POOL=0x... AMOUNT_ETHER=100 LOCK_DAYS=30 ADDRESSES_JSON=./addresses.json \
 forge script script/BatchDeposit.s.sol --rpc-url $RPC --private-key $PK --broadcast
+
+# 3b. Task card batch creation (per-card basicAmount + tasks)
+POOL=0x... LOCK_DAYS=30 CARDS_JSON=./task-cards.json \
+forge script script/BatchDepositWithTasks.s.sol --rpc-url $RPC --private-key $PK --broadcast
 ```
 
-`addresses.json`：
+`addresses.json` (plain cards):
 ```json
 { "addresses": ["0xAbc...", "0xDef...", ...] }
 ```
 
-### NFT 变体
+`task-cards.json` (task cards, amounts in the token's smallest unit):
+```json
+{
+  "cards": [
+    {
+      "unlockAddress": "0xCard1...",
+      "basicAmount": 10000000000000000000,
+      "taskHashes":  ["0xabc...", "0xdef..."],
+      "taskAmounts": [20000000000000000000, 30000000000000000000]
+    }
+  ]
+}
+```
+`taskHashes[i] = keccak256(abi.encode(chainid, pool, unlockAddress, i, preimage_i))`; preimages are generated and kept off-chain, **and must be computed with the target chain's chainid** — different chains need different hashes. See [integration-examples/token/README.md](./integration-examples/token/README.md#task-card).
 
-> ⚠️ **Collection 尽调（部署方责任，Factory 不校验）**：合约信任 `lockedCollection` 忠实遵循 ERC721。可升级 / 恶意 collection 可以注册幽灵卡永久 brick `unlockAddress`。建议：
-> - 非升级合约（无 EIP-1967 proxy slot）
-> - 来源可信 / 经过审计
-> - `safeTransferFrom`、`transferFrom`、`ownerOf` 行为标准
+### NFT Variant
+
+> ⚠️ **Collection due diligence (deployer's responsibility, not checked by the factory)**: the contract trusts `lockedCollection` to follow ERC721 faithfully. An upgradeable / malicious collection can register phantom cards and permanently brick an `unlockAddress`. Recommended:
+> - Non-upgradeable contract (no EIP-1967 proxy slot)
+> - Trusted source / audited
+> - Standard `safeTransferFrom`, `transferFrom`, `ownerOf` behavior
 
 ```bash
-# 1. 部署 Factory（一次性）
+# 1. Deploy the factory (one-time)
 forge script script/DeployNFTFactory.s.sol --rpc-url $RPC --private-key $PK --broadcast
 
-# 2. 创建 Pool（每个 collection × 每个 initiator 一次；INITIATOR 必填）
+# 2. Create a pool (once per collection × initiator; INITIATOR required)
 FACTORY=0x... COLLECTION=0x... INITIATOR=0x... \
 forge script script/CreateNFTPool.s.sol --rpc-url $RPC --private-key $PK --broadcast
 
-# 3. 批量存款（脚本层循环 deposit；任一失败整批 revert）
+# 3. Batch deposit (script-level loop over deposit; whole batch reverts if any one fails)
 POOL=0x... LOCK_DAYS=30 ENTRIES_JSON=./entries.json \
 forge script script/BatchDepositNFT.s.sol --rpc-url $RPC --private-key $PK --broadcast
 ```
 
-`entries.json`：
+`entries.json`:
 ```json
 {
   "entries": [
@@ -241,24 +294,26 @@ forge script script/BatchDepositNFT.s.sol --rpc-url $RPC --private-key $PK --bro
 }
 ```
 
-## 端到端测试（设备 + 合约）
+## End-to-End Testing (Device + Contract)
 
-需要 STM32 设备连接：
+> ⚠️ **Unavailable to external users**: `e2e_test.py` depends on a private STM32 hardware-signing toolchain (`../mac_tool/stm32_crypto_wrapper`, outside this repo) and a physical device connection, neither of which is open-sourced here. External contributors should rely on `forge test` (130 unit tests) — it simulates device signing with Foundry's `vm.sign` and covers all contract logic.
+
+When you have an STM32 device + the private `mac_tool`:
 
 ```bash
 ../mac_tool/venv/bin/python3 e2e_test.py
 ```
 
-当前覆盖 Token 变体：withdraw（任意人提交）/ withdrawExpired（快进 30 天）/ batchDeposit / 错误签名 revert / Factory 地址预测一致性。NFT 变体的 e2e 待补。
+Currently covers the Token variant: withdraw (submitted by anyone) / withdrawExpired (fast-forward 30 days) / batchDeposit / wrong-signature revert / factory address-prediction consistency. The NFT variant's e2e is still to come.
 
-## 集成
+## Integration
 
-钱包 App 集成示例与文档：
+Wallet-app integration examples and docs:
 
-- [integration-examples/](./integration-examples/README.md) —— 总览与变体对比
-- [integration-examples/token/](./integration-examples/token/README.md) —— ERC20 集成（含 viem 示例）
-- [integration-examples/nft/](./integration-examples/nft/README.md) —— ERC721 集成（含 viem 示例 + `to` 校验注意事项）
+- [integration-examples/](./integration-examples/README.md) — overview and variant comparison
+- [integration-examples/token/](./integration-examples/token/README.md) — ERC20 integration (with viem examples)
+- [integration-examples/nft/](./integration-examples/nft/README.md) — ERC721 integration (with viem examples + `to` validation notes)
 
-## 许可
+## License
 
 MIT
