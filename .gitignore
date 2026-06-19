@@ -5,10 +5,11 @@ out/
 # Dependencies (managed by forge install)
 lib/
 
-# Ignores development broadcast logs
-!/broadcast
-/broadcast/*/31337/
-/broadcast/**/dry-run/
+# Forge broadcast logs (deploy artifacts; not tracked)
+broadcast/
+
+# Ad-hoc audit/exploration tests (kept local)
+test/BugHunt.t.sol
 
 # Docs
 docs/
@@ -16,5 +17,6 @@ docs/
 # Dotenv file
 .env
 
-# Dependencies (forge install pulls lib/ via git submodules, not tracked here)
+# Backup files (e.g. produced by script/merge-mock-suite-txhashes.sh)
+*.bak
 
