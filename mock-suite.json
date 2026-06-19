@@ -1,0 +1,74 @@
+{
+  "chainId": 11155111,
+  "deployer": "0x73dA4C24de4268238eF59a463FDeb41d9059c71E",
+  "mintPerToken": 1000000,
+  "erc20": [
+    {
+      "address": "0x2995768684EBe974e3F6dEFDba36BD32582Cf4d6",
+      "name": "Test USDC",
+      "symbol": "USDC",
+      "decimals": 6,
+      "txHash": "0x76022649f1e3da0381a0da8c4fec7917642953760ce6fb6efa1f29b1b1c7c66f"
+    },
+    {
+      "address": "0x3a895a957f81E08E3e04c5D6A50Ee2Bd78C33C93",
+      "name": "Test USDT",
+      "symbol": "USDT",
+      "decimals": 6,
+      "txHash": "0xcefc260a6f0dc39df6d12d0f31ce1abea5882214692bb42e80aea95500a3ae25"
+    },
+    {
+      "address": "0x9BdF7fF8FC01452eB2cAAa1bCE60bb5E2F3A3106",
+      "name": "Test DAI",
+      "symbol": "DAI",
+      "decimals": 18,
+      "txHash": "0xe51270f56db6ea2d74272f80e0b0472e4334d54150b7b473e4e0f70cb41f63d0"
+    },
+    {
+      "address": "0x8A42841509377D0631f5EF86A403f5175904DDAf",
+      "name": "Test WBTC",
+      "symbol": "WBTC",
+      "decimals": 8,
+      "txHash": "0xdbeefed6979341f4042d514daa8d5b1507fa699f179e49e4a36dfd48594284c6"
+    },
+    {
+      "address": "0x89170430C188249f9BdDf4c9864B834096E33E33",
+      "name": "Test WETH",
+      "symbol": "WETH",
+      "decimals": 18,
+      "txHash": "0x7c3bb41d6e138116a0a5086314d9ec6dcf87ba4ed612b30d63a35ceeb4e1913f"
+    }
+  ],
+  "erc721": [
+    {
+      "address": "0x773065A039d3FBc8BD7ae79702fC8CEcFEeD87B4",
+      "name": "Test Bored Apes",
+      "symbol": "TBAYC",
+      "txHash": "0xdd41a1470a74ebb94e9217c9610ea1c3375f8d0110d5befc51d58de11f75d95f"
+    },
+    {
+      "address": "0x65Cb3867F672f6399Ee60Cf1f946A07e1e0206F2",
+      "name": "Test Doodles",
+      "symbol": "TDOOD",
+      "txHash": "0xa691bf09e2741e8fed8f02b21759d2a14f5b91952ee957ca77b58922a756f113"
+    },
+    {
+      "address": "0xDd08B6556484216b59200345bc5e5aE75F0C5B31",
+      "name": "Test CryptoPunks",
+      "symbol": "TPUNK",
+      "txHash": "0xcfcca7e613a450c37ad1fa86ee58d6b059672e06d5704cd5232b2e2e003c0c3b"
+    },
+    {
+      "address": "0xD4A613E7F41E5a2c7873a0714B934d8E9af155DF",
+      "name": "Test Azuki",
+      "symbol": "TAZUKI",
+      "txHash": "0x1a61ddb12f18fc045deaba9f74c46b0288e1c0d45c70c800c484ef9158c0247a"
+    },
+    {
+      "address": "0xf93cac9848eDB6ebf453396E1A17bF2105D7a692",
+      "name": "Test Mutant Apes",
+      "symbol": "TMAYC",
+      "txHash": "0x1f0e6a213bc682f24d49785c316a04d59742030b22f0029d43ef45898b90a8cb"
+    }
+  ]
+}

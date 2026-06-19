@@ -1,0 +1,4 @@
+chain=sepolia
+chainid=11155111
+erc20factory=0x17377bf481061010fEc4D1eCB845Ca2c17233054
+mockerc20=0xd74deb7f55e8b5eeb9085d5b1cc77be0887992d7
