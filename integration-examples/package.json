@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "example:nft": "npx tsx nft/viem/src/index.ts",
+    "example:nft-task-claim": "npx tsx nft/viem/src/task-claim-cli.ts",
     "example:token": "npx tsx token/viem/src/index.ts",
+    "example:token-task-claim": "npx tsx token/viem/src/task-claim-cli.ts",
     "format": "prettier --write \"**/viem/src/**/*.ts\"",
     "format:check": "prettier --check \"**/viem/src/**/*.ts\""
   },

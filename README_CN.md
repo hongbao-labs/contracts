@@ -9,10 +9,10 @@
 | Token | ERC20 | `HongBaoTokenPool` | `HongBaoTokenFactory` | [integration-examples/token](./integration-examples/token/README.md) |
 | NFT   | ERC721 | `HongBaoNFTPool` | `HongBaoNFTFactory` | [integration-examples/nft](./integration-examples/nft/README.md) |
 
-Token pool 同时支持两种卡：
+两套 pool 都支持两种卡：
 
-- **普通卡 (plain)** —— 一次签名领全额，传统红包。
-- **任务卡 (task)** —— 一次签名只绑定收款地址 + 释放 `basicAmount`，后续每完成一个任务由项目方下发 preimage，**任何人**提交 `claimTask` 把任务奖励强转给已绑定地址。CTF-flag 风格的渐进解锁，把签名从"领钱凭证"换成"绑定凭证"。
+- **普通卡 (plain)** —— 一次签名领全额资产（Token 为全部余额，NFT 为绑定的那个 NFT），传统红包。
+- **任务卡 (task)** —— 一次签名只绑定收款地址 + 释放可选的"basic"奖励，后续每完成一个任务由项目方下发 preimage，**任何人**提交 `claimTask` 把任务奖励（Token：金额；NFT：某个 tokenId）强转给已绑定地址。CTF-flag 风格的渐进解锁，把签名从"领钱凭证"换成"绑定凭证"。
 
 合约完全去中心化：无 owner、无 pause、无手续费、无特权中继。
 
@@ -22,14 +22,20 @@ Token pool 同时支持两种卡：
 普通卡:
   1. 项目方 deposit() 存入资产
   2. 持卡人硬件签名 Withdraw(unlockAddress, to)
-  3. 任何人提交 withdraw() → 全额到 to，卡消费
+  3. 任何人提交 withdraw() → 全额资产到 to，卡消费
   4. 过期未领 → initiator/depositor withdrawExpired() 回收
 
-任务卡 (仅 Token, 限定模式):
-  1. 项目方 depositWithTasks() 锁卡 + 上链 taskHashes[]
+Token 任务卡 (限定模式):
+  1. 项目方 depositWithTasks() 锁卡 + 上链 taskHashes[]/taskAmounts[]
   2. 持卡人硬件签名 Withdraw(unlockAddress, to) → withdraw() 转 basicAmount 给 to 并永久绑定 boundTo
-  3. 用户完成任务 → 项目方下发 preimage → 任何人 claimTask() 强转 boundTo
+  3. 用户完成任务 → 项目方下发 preimage → 任何人 claimTask() 把任务金额强转 boundTo
   4. 过期未领 → initiator withdrawExpired() 一次性回收剩余并 close 卡
+
+NFT 任务卡 (限定模式, 每槽 1 个 NFT, 原子 pull 批量):
+  1. 项目方 depositWithTasks() 原子拉取 basic NFT(若 hasBasic) + 每个 task 的 tokenId；taskHashes[]/taskTokenIds[] 上链
+  2. 持卡人硬件签名 Withdraw(unlockAddress, to) → withdraw() 把 basic NFT(若有) safeTransferFrom 给 to 并永久绑定 boundTo
+  3. 用户完成任务 → 项目方下发 preimage → 任何人 claimTask() 把该任务的 tokenId safeTransferFrom 到 boundTo
+  4. 过期未领 → initiator withdrawExpired() 一次性回收未领 NFT 并 close 卡（批量路径每槽 try/catch）
 ```
 
 ERC20 与 ERC721 在签名层面完全一致（同一 EIP-712 schema），仅资产类型与少量管理细节不同 —— 详见 [集成示例索引](./integration-examples/README.md) 中的差异表。
@@ -86,7 +92,7 @@ Withdraw(address unlockAddress, address to)
 - 单次签名：`unlockedAt != 0` 后无法再次提取，无需 nonce
 - 防跨链/跨合约重放：Domain 绑 chainId + pool 地址
 
-> ⚠️ **NFT 特别注意**：合约 withdraw 内部用 `safeTransferFrom`，`to` 必须能接收 ERC721。硬件设备每张卡只能签一次，签错了 `to`（如不实现 `IERC721Receiver` 的合约）这张卡就报废。集成方在让设备签名前必须校验 `to`。详见 [integration-examples/nft/README.md](./integration-examples/nft/README.md)。
+> ⚠️ **NFT 特别注意**：合约 withdraw 内部用 `safeTransferFrom`，`to` 必须能接收 ERC721。硬件设备每张卡只能签一次，普通卡签错了 `to`（如不实现 `IERC721Receiver` 的合约）这张卡就报废。任务卡里 `boundTo` 在绑定时永久确定，之后每个 task 槽都会各自 `safeTransferFrom` 把 NFT 转给 `boundTo` —— 一个非 receiver 的 `boundTo` 会让后续每一次 claim **逐槽报废**。集成方在让设备签名前必须校验 `to`。详见 [integration-examples/nft/README.md](./integration-examples/nft/README.md)。
 
 ## 核心函数
 
@@ -139,32 +145,51 @@ Token pool 同时支持两种卡：
 
 ### NFT Pool（`HongBaoNFTPool`）
 
+NFT pool 支持与 Token pool 相同的两种卡，按 ERC721 语义适配：
+
+- **普通卡 (`cardTaskCount == 0`)** —— 一次签名领取单个绑定的 tokenId。
+- **任务卡 (`cardTaskCount > 0`)** —— 一次签名绑定 `to`（若 `hasBasic` 则同时释放 basic NFT）；后续每个任务由项目方下发 preimage，**任何人**提交 `claimTask` 把该任务的 tokenId 强转 `boundTo`。basic + 所有 task tokenId 在建卡时固定（无 topup）。
+
 #### 存款
 
-| 函数 | 说明 |
-|---|---|
-| `deposit(unlockAddress, tokenId, lockTime)` | Pull 路径。initiator 提前 approve 后调用 |
-| `onERC721Received(...)` | Push 路径。initiator 直接 `safeTransferFrom(initiator, pool, tokenId, abi.encode(unlockAddress, lockTime))` |
+| 函数 | 卡类型 | 说明 |
+|---|---|---|
+| `deposit(unlockAddress, tokenId, lockTime)` | 普通 | Pull 路径。initiator 提前 approve 后调用 |
+| `onERC721Received(...)` | 普通 | Push 路径。initiator 直接 `safeTransferFrom(initiator, pool, tokenId, abi.encode(unlockAddress, lockTime))`。**仅普通卡** —— 任务卡必须用 `depositWithTasks` |
+| `depositWithTasks(unlockAddress, hasBasic, basicTokenId, taskHashes[], taskTokenIds[], lockTime)` | 任务卡 | 原子 N+1 pull：basic NFT(若 hasBasic) + 每个 task tokenId。任一 `transferFrom` 失败则整笔 revert |
+| `batchDepositWithTasks(unlockAddresses[], hasBasics[], basicTokenIds[], taskHashes[][], taskTokenIds[][], lockTime)` | 任务卡 | 原子批量任意形态任务卡，一笔交易完成 |
 
-NFT 没有 `batchDeposit` —— 一张卡只持有一个 tokenId，批量在脚本层用循环实现（见 `script/BatchDepositNFT.s.sol`）。
+NFT 没有普通卡的 `batchDeposit` —— 一张普通卡只持有一个 tokenId，普通卡批量在脚本层用循环实现（见 `script/BatchDepositNFT.s.sol`）。任务卡有链上的 `batchDepositWithTasks`，因为它本身就要对每张卡的槽位集合做内部循环。
 
 #### 提取
 
 | 函数 | 调用者 | 说明 |
 |---|---|---|
-| `withdraw(unlockAddress, to, v, r, s)` | 任何人 | 转 NFT 给 `to`（用 `safeTransferFrom`），卡片消费 |
-| `withdrawExpired(unlockAddress)` | initiator | 取回 NFT；严格 revert |
-| `batchWithdrawExpired(unlockAddresses[])` | initiator | 批量；已兑付/无 deposit 静默跳过；单条 `safeTransferFrom` 失败也跳过，状态保留以便重试 |
+| `withdraw(unlockAddress, to, v, r, s)` | 任何人 | 普通卡：转 NFT 给 `to`，卡消费。任务卡：若 `hasBasic` 把 basic NFT `safeTransferFrom` 给 `to`；两种情况都绑定 `boundTo = to` 并置 `unlockedAt`，卡仍 active 可领任务 |
+| `batchWithdraw(unlockAddresses[], tos[], vs[], rs[], ss[])` | 任何人（relayer 用） | 批量 withdraw；坏签名 / 已兑付 / 已 closed / 零 to / 非 receiver to 条目静默跳过，每个失败 emit `BatchTransferFailed(unlockAddress, tokenId)` |
+| `claimTask(unlockAddress, taskIdx, n)` | 任何人 | 校验 `keccak256(abi.encode(chainid, pool, unlockAddress, taskIdx, n)) == taskHashes[taskIdx]`，把 `taskTokenIds[taskIdx]` `safeTransferFrom` 到 `boundTo`。需先 `withdraw` 绑定 |
+| `batchClaimTask(unlockAddresses[], taskIdxs[], preimages[])` | 任何人（relayer 用） | 批量 claim；非任务卡 / 越界 / 已 closed / 未 bind / 已 claim / 错 preimage / 非 receiver boundTo 条目静默跳过 |
+| `withdrawExpired(unlockAddress)` | initiator | 普通卡：取回 NFT。任务卡：原子回收 basic(若 hasBasic) + 每个未领 task NFT 并置 `closed = true`。单笔 —— 任一槽位转账失败则 revert |
+| `batchWithdrawExpired(unlockAddresses[])` | initiator | 批量；单条 `safeTransferFrom` 失败跳过，状态保留以便重试。任务卡仅当所有槽位都成功回收后才置 `closed = true`；普通 + 任务卡可混合一批 |
+
+> `batchWithdraw` / `batchClaimTask` / `batchWithdrawExpired` 设计成 skip-silently：一批 N 条里有一条状态过期或 `safeTransferFrom` revert（非 receiver 的 to/boundTo 等），不应该让其它 N-1 条陪葬。Off-chain 通过事件 (`Withdrawn` / `TaskClaimed`) 判定哪些成功。
 
 #### View
 
 | 函数 | 返回 |
 |---|---|
-| `cardTokenId(unlockAddress)` | 卡片绑定的 tokenId（**注意**：0 是合法值，需用 `cardExpire != 0` 判定是否存在）|
+| `cardTokenId(unlockAddress)` | 普通卡：绑定的 tokenId。任务卡且 `hasBasic`：basic NFT id（`withdraw` 后清零）。否则 0。**注意**：0 是合法 tokenId，需用 `cardExpire != 0` 判定是否存在 |
+| `cardTaskCount(unlockAddress)` | 0 = 普通卡，>0 = 任务卡 |
+| `cardHasBasic(unlockAddress)` | 仅任务卡：basic NFT 是否还在池中（`withdraw` 释放后清除） |
+| `cardBoundTo(unlockAddress)` | 任务卡 `withdraw` 之后绑定的 to（普通卡或未绑定返回 0） |
+| `cardClosed(unlockAddress)` | 任务卡是否已被 initiator 通过 `withdrawExpired` 关闭 |
 | `cardExpire(unlockAddress)` | 过期时间戳（0 表示卡不存在） |
-| `cardUnlockedAt(unlockAddress)` | 兑付时间戳（0 = 未兑付） |
+| `cardUnlockedAt(unlockAddress)` | 兑付时间戳（普通卡=领取时间；任务卡=basic withdraw/绑定时间） |
+| `task(unlockAddress, taskIdx)` | `(hash, tokenId, claimedAt)` |
+| `computeTaskHash(unlockAddress, taskIdx, n)` | 链下校验工具，等价于 `keccak256(abi.encode(chainid, pool, unlockAddress, taskIdx, n))` |
 | `lockedCollection()` | 绑定的 ERC721 collection 地址 |
 | `initiator()` | 唯一 depositor（保证非零） |
+| `MAX_TASKS_PER_CARD()` | 255 |
 
 ### 共用 View（两套 pool 一致）
 
@@ -203,7 +228,7 @@ NFT 没有 `batchDeposit` —— 一张卡只持有一个 tokenId，批量在脚
 # 编译（启用 optimizer + via_ir，详见 foundry.toml）
 forge build
 
-# 跑全量测试（130 tests，覆盖 Token / NFT / 任务卡）
+# 跑全量测试（~200 tests，覆盖 Token / NFT / 普通卡 + 任务卡）
 forge test -vv
 
 # 仅 Token 测试
@@ -220,8 +245,11 @@ forge test --match-path "test/HongBaoNFT*.t.sol" -vv
 - **HongBaoTokenPool 任务卡（45 tests）**: depositWithTasks（happy / 边界 / 所有 reject）/ topup 进 basic / withdraw 释放 basic + 绑定 boundTo / claimTask（happy / 任何人可调 / hash 绑定跨链 + 跨卡复用必败 / 过期未 close 仍可领 / 已 close revert）/ withdrawExpired 任务卡分支 / batchWithdrawExpired 混合普通 + 任务卡 / batchDepositWithTasks 原子失败回滚 / views
 - **HongBaoTokenPool batchWithdraw / batchClaimTask（17 tests）**: 两个批量函数的 happy path（同一卡多任务、跨卡）/ skip-silently（坏签名、已兑付、零 to、错 preimage、basic 未完成、已 close、越界 idx、非任务卡、已领过的槽位）/ 长度校验
 - **HongBaoTokenFactory（8 tests）**: `createPool` 正常 / 重复 `PoolExists` / `computePoolAddress` 与实际部署地址一致 / 开放模式 pool / 不同 (token, initiator) 组合
-- **HongBaoNFTPool（19 tests）**: pull / push deposit / withdraw / withdrawExpired / batchWithdrawExpired / 接收方兼容性 / views / 构造参数校验
+- **HongBaoNFTPool 普通卡（19 tests）**: pull / push deposit / withdraw / withdrawExpired / batchWithdrawExpired / 接收方兼容性 / views / 构造参数校验
+- **HongBaoNFTPool 任务卡（43 tests）**: depositWithTasks（happy / 有无 basic / 所有 reject / 缺 approval 原子回滚）/ withdraw 释放 basic（或纯绑定）+ 绑定 boundTo / claimTask（happy / 任何人可调 / hash 绑定跨链 + 跨卡 + 跨槽复用必败 / 过期未 close 仍可领 / 已 close revert）/ withdrawExpired 任务卡分支（原子回收 + close）/ batchWithdrawExpired 混合普通 + 任务卡 / batchDepositWithTasks 原子回滚 / views（含 hasBasic / boundTo / closed）/ chainid 绑定 hash 校验
+- **HongBaoNFTPool batchWithdraw / batchClaimTask（17 tests）**: happy path（同一卡多任务、跨卡）/ skip-silently（坏签名、已兑付、非 receiver to、零 to、错 preimage、basic 未完成、已 close、越界、普通卡误当任务卡、已领过的槽位）/ `batchWithdrawExpired` 任务卡部分失败保留卡片以便重试
 - **HongBaoNFTFactory（3 tests）**: `createPool` 正常 / 重复 `PoolExists` / `computePoolAddress` 与实际部署地址一致
+- **HongBaoLens（6 tests）**: token + NFT 视图聚合，覆盖普通卡与任务卡（含全槽位填充）
 
 ## 部署脚本
 
@@ -262,7 +290,7 @@ forge script script/BatchDepositWithTasks.s.sol --rpc-url $RPC --private-key $PK
   ]
 }
 ```
-`taskHashes[i] = keccak256(abi.encode(chainid, pool, unlockAddress, i, preimage_i))`，preimage 链下生成保管，**且必须按目标链的 chainid 计算** —— 不同链需要不同 hash。详见 [integration-examples/token/README.md](./integration-examples/token/README.md#任务卡-task-card)。
+`taskHashes[i] = keccak256(abi.encode(chainid, pool, unlockAddress, i, preimage_i))`，preimage 链下生成保管，**且必须按目标链的 chainid 计算** —— 不同链需要不同 hash。详见 [integration-examples/token/README.md](./integration-examples/token/README.md#task-card)。
 
 ### NFT 变体
 
@@ -279,12 +307,16 @@ forge script script/DeployNFTFactory.s.sol --rpc-url $RPC --private-key $PK --br
 FACTORY=0x... COLLECTION=0x... INITIATOR=0x... \
 forge script script/CreateNFTPool.s.sol --rpc-url $RPC --private-key $PK --broadcast
 
-# 3. 批量存款（脚本层循环 deposit；任一失败整批 revert）
+# 3a. 普通卡批量存款（脚本层循环 deposit；任一失败整批 revert）
 POOL=0x... LOCK_DAYS=30 ENTRIES_JSON=./entries.json \
 forge script script/BatchDepositNFT.s.sol --rpc-url $RPC --private-key $PK --broadcast
+
+# 3b. 任务卡批量建卡（每张卡独立 hasBasic + basicTokenId + tasks；链上原子批量）
+POOL=0x... LOCK_DAYS=30 CARDS_JSON=./nft-task-cards.json \
+forge script script/BatchDepositNFTWithTasks.s.sol --rpc-url $RPC --private-key $PK --broadcast
 ```
 
-`entries.json`：
+`entries.json`（普通卡）：
 ```json
 {
   "entries": [
@@ -294,9 +326,32 @@ forge script script/BatchDepositNFT.s.sol --rpc-url $RPC --private-key $PK --bro
 }
 ```
 
+`nft-task-cards.json`（任务卡；tokenId 用字符串以保证 JSON 精度）：
+```json
+{
+  "cards": [
+    {
+      "unlockAddress": "0xCard1...",
+      "hasBasic": true,
+      "basicTokenId": "1",
+      "taskHashes": ["0xabc...", "0xdef..."],
+      "taskTokenIds": ["10", "11"]
+    },
+    {
+      "unlockAddress": "0xCard2...",
+      "hasBasic": false,
+      "basicTokenId": "0",
+      "taskHashes": ["0x123..."],
+      "taskTokenIds": ["20"]
+    }
+  ]
+}
+```
+`hasBasic: false` 会让签名 `withdraw` 变成纯绑定（不立即释放 NFT，只锁定 `boundTo`）。`hasBasic` 为 false 时 `basicTokenId` 链上忽略，但脚本为统一结构仍要求该字段 —— 填 `"0"` 即可。`taskHashes[i] = keccak256(abi.encode(chainid, pool, unlockAddress, i, preimage_i))`，preimage 链下生成保管，**且必须按目标链的 chainid 计算**。详见 [integration-examples/nft/README.md](./integration-examples/nft/README.md#task-card)。
+
 ## 端到端测试（设备 + 合约）
 
-> ⚠️ **外部用户不可用**：`e2e_test.py` 依赖一套私有的 STM32 硬件签名工具（仓库外的 `../mac_tool/stm32_crypto_wrapper`）以及实体设备连接，未随本仓库开源。外部贡献者请以 `forge test`（130 个单元测试）为准——它用 Foundry 的 `vm.sign` 模拟设备签名，覆盖了全部合约逻辑。
+> ⚠️ **外部用户不可用**：`e2e_test.py` 依赖一套私有的 STM32 硬件签名工具（仓库外的 `../mac_tool/stm32_crypto_wrapper`）以及实体设备连接，未随本仓库开源。外部贡献者请以 `forge test`（~200 个单元测试）为准——它用 Foundry 的 `vm.sign` 模拟设备签名，覆盖了全部合约逻辑。
 
 需要 STM32 设备 + 私有 `mac_tool` 时：
 

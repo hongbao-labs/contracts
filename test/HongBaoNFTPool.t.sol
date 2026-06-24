@@ -62,6 +62,12 @@ contract HongBaoNFTPoolTest is Test {
         assertEq(pool.cardExpire(cardAddr), block.timestamp + MIN_LOCK);
         assertEq(nft.ownerOf(1), address(pool));
         assertTrue(pool.isLocked(cardAddr));
+
+        // Plain cards: task-card fields must stay at defaults.
+        assertEq(pool.cardTaskCount(cardAddr), 0);
+        assertFalse(pool.cardHasBasic(cardAddr));
+        assertEq(pool.cardBoundTo(cardAddr), address(0));
+        assertFalse(pool.cardClosed(cardAddr));
     }
 
     function test_deposit_revert_not_initiator() public {

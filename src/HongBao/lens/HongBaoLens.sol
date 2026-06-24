@@ -40,13 +40,27 @@ contract HongBaoLens {
         TokenTaskView[] tasks;
     }
 
-    struct NFTCardView {
+    struct NFTTaskView {
+        bytes32 hash;
         uint256 tokenId;
+        uint256 claimedAt; // 0 = unclaimed
+    }
+
+    struct NFTCardView {
+        // raw card fields
+        uint256 tokenId; // plain: THE NFT; task with hasBasic: basic NFT
         uint256 expire;
         uint256 unlockedAt;
+        address boundTo;
+        uint8 taskCount; // 0 = plain card; >0 = task card
+        bool hasBasic; // task only
+        bool closed; // task only
+        // derived view-helpers
         bool isLocked;
         bool isExpired;
         uint256 remainingLockTime;
+        // task slots; length == taskCount (empty for plain cards)
+        NFTTaskView[] tasks;
     }
 
     struct TokenPoolInfo {
@@ -64,6 +78,7 @@ contract HongBaoLens {
         uint256 minLockTime;
         bytes32 domainSeparator;
         bytes32 withdrawTypehash;
+        uint8 maxTasksPerCard;
     }
 
     // ============================================================
@@ -129,14 +144,29 @@ contract HongBaoLens {
     //                        NFT POOL LENS
     // ============================================================
 
-    /// @notice Fetch one NFT card's complete state in one call.
+    /// @notice Fetch one NFT card's complete state (incl. all task slots) in one call.
     function getNFTCard(IHongBaoNFTPool pool, address unlockAddress) public view returns (NFTCardView memory v) {
         v.tokenId = pool.cardTokenId(unlockAddress);
         v.expire = pool.cardExpire(unlockAddress);
         v.unlockedAt = pool.cardUnlockedAt(unlockAddress);
+        v.boundTo = pool.cardBoundTo(unlockAddress);
+        v.taskCount = pool.cardTaskCount(unlockAddress);
+        v.hasBasic = pool.cardHasBasic(unlockAddress);
+        v.closed = pool.cardClosed(unlockAddress);
         v.isLocked = pool.isLocked(unlockAddress);
         v.isExpired = pool.isExpired(unlockAddress);
         v.remainingLockTime = pool.remainingLockTime(unlockAddress);
+
+        if (v.taskCount > 0) {
+            v.tasks = new NFTTaskView[](v.taskCount);
+            for (uint8 i = 0; i < v.taskCount;) {
+                (bytes32 hash_, uint256 tokenId_, uint256 claimedAt) = pool.task(unlockAddress, i);
+                v.tasks[i] = NFTTaskView({hash: hash_, tokenId: tokenId_, claimedAt: claimedAt});
+                unchecked {
+                    ++i;
+                }
+            }
+        }
     }
 
     /// @notice Batch fetch many NFT cards from one pool in a single call.
@@ -162,5 +192,6 @@ contract HongBaoLens {
         info.minLockTime = pool.MIN_LOCK_TIME();
         info.domainSeparator = pool.DOMAIN_SEPARATOR();
         info.withdrawTypehash = pool.WITHDRAW_TYPEHASH();
+        info.maxTasksPerCard = pool.MAX_TASKS_PER_CARD();
     }
 }

@@ -170,8 +170,12 @@ contract HongBaoLensTest is Test {
         assertEq(v.tokenId, 1);
         assertGt(v.expire, 0);
         assertEq(v.unlockedAt, 0);
+        assertEq(v.taskCount, 0);
+        assertFalse(v.hasBasic);
+        assertFalse(v.closed);
         assertTrue(v.isLocked);
         assertFalse(v.isExpired);
+        assertEq(v.tasks.length, 0);
 
         address[] memory cards = new address[](2);
         cards[0] = card;
@@ -184,5 +188,59 @@ contract HongBaoLensTest is Test {
         HongBaoLens.NFTPoolInfo memory info = lens.getNFTPoolInfo(IHongBaoNFTPool(address(pool)));
         assertEq(info.lockedCollection, address(nft));
         assertEq(info.initiator, initiator);
+        assertEq(info.maxTasksPerCard, pool.MAX_TASKS_PER_CARD());
+    }
+
+    function test_nft_task_card_view_with_all_slots() public {
+        MockERC721 nft = new MockERC721("N", "N");
+        HongBaoNFTPool pool = new HongBaoNFTPool(address(nft), initiator);
+        for (uint256 i = 1; i <= 4; i++) {
+            nft.mint(initiator, i);
+        }
+        vm.startPrank(initiator);
+        nft.setApprovalForAll(address(pool), true);
+
+        uint256 cardPk = 0xBEEF;
+        address card = vm.addr(cardPk);
+
+        bytes32[] memory hashes = new bytes32[](3);
+        hashes[0] = keccak256(abi.encode(block.chainid, address(pool), card, uint8(0), bytes("p0")));
+        hashes[1] = keccak256(abi.encode(block.chainid, address(pool), card, uint8(1), bytes("p1")));
+        hashes[2] = keccak256(abi.encode(block.chainid, address(pool), card, uint8(2), bytes("p2")));
+        uint256[] memory tids = new uint256[](3);
+        tids[0] = 2;
+        tids[1] = 3;
+        tids[2] = 4;
+        pool.depositWithTasks(card, true, 1, hashes, tids, 30 days);
+        vm.stopPrank();
+
+        // before basic withdraw
+        HongBaoLens.NFTCardView memory v = lens.getNFTCard(IHongBaoNFTPool(address(pool)), card);
+        assertEq(v.taskCount, 3);
+        assertTrue(v.hasBasic);
+        assertEq(v.tokenId, 1); // basic NFT
+        assertEq(v.boundTo, address(0));
+        assertFalse(v.closed);
+        assertEq(v.tasks.length, 3);
+        assertEq(v.tasks[0].tokenId, 2);
+        assertEq(v.tasks[1].tokenId, 3);
+        assertEq(v.tasks[2].tokenId, 4);
+        assertEq(v.tasks[0].hash, hashes[0]);
+        assertEq(v.tasks[0].claimedAt, 0);
+
+        // bind + claim one task
+        address user = address(0xCAFE);
+        (uint8 vSig, bytes32 r, bytes32 s) = vm.sign(cardPk, pool.getWithdrawDigest(card, user));
+        pool.withdraw(card, user, vSig, r, s);
+        pool.claimTask(card, 1, "p1");
+
+        v = lens.getNFTCard(IHongBaoNFTPool(address(pool)), card);
+        assertFalse(v.hasBasic, "basic consumed");
+        assertEq(v.tokenId, 0, "basic slot cleared");
+        assertEq(v.boundTo, user, "boundTo set");
+        assertGt(v.unlockedAt, 0);
+        assertGt(v.tasks[1].claimedAt, 0, "task1 claimedAt set");
+        assertEq(v.tasks[0].claimedAt, 0);
+        assertEq(v.tasks[2].claimedAt, 0);
     }
 }
